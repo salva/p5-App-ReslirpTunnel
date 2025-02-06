@@ -1,0 +1,61 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use Socket;
+use Net::OpenSSH;
+use Getopt::Long qw(GetOptions);
+
+use App::SlirpTunnel;
+
+my $reslirp_command = 'C:\\Program Files\\reSLIRP\\reslirp.exe';
+my $debug_arg;
+my $debug_level = 0;
+my @dump_flags;
+my $target_address;
+my $remote_port = 22;  # Default port
+
+GetOptions( 'c|reslirp-cmd|reslirp-command=s' => \$reslirp_command,
+            'd'   => sub { $debug_level++ },
+            'D=s' => sub { push @dump_flags, $_[1] },
+            'p=s' => \$remote_port )  # New option for remote port
+    or die "Usage: $0 [-c command] [-d] [-D arg] [-p remote_port] [target_address]";
+
+$target_address = shift @ARGV // "localhost";
+
+# Allow remote address to accept port in the format hostname:port
+if ($target_address =~ /^(.*?):(\d+)$/) {
+    $remote_port = $2;
+    $target_address = $1;
+}
+
+my $master = App::SlirpTunnel->new();
+$master->start() or die "Failed to start master: $!";
+$master->hello() or die "Failed to send hello: $!";
+my ($device, $tap_fh) = $master->create_tap();
+$tap_fh // die "Failed to setup tap interface: $!";
+$master->device_up($device) or die "Failed to bring up device: $!";
+$master->device_addr_add($device, '10.0.2.20', 24) or die "Failed to set device address: $!";
+$master->bye;
+
+#sleep 100;
+
+warn "Tap device received: ".fileno($tap_fh)."\n";
+
+sleep 1;
+warn "Starting SSH\n";
+
+my $ssh = Net::OpenSSH->new($target_address, port => $remote_port, remote_shell => 'MSWin');
+$ssh->die_on_error;
+
+$ssh->system("echo hello from Windows!");
+
+# Building the remote command in multiple steps
+my @command = ($reslirp_command);
+push @command, ('-d') x $debug_level if $debug_level > 0;
+push @command, "-D$_" for @dump_flags;
+push @command, @ARGV;
+
+my ($socket, $pid) = $ssh->open2socket({quote_args => 1}, @command);
+
+App::SlirpTunnel::loop($tap_fh, $socket);
