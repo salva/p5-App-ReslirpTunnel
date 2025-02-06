@@ -100,7 +100,7 @@ sub start {
     my $socket = IO::Socket::UNIX->new_from_fd(3, "r+")
         or die "Failed to create socket: $!";
 
-    my $server = App::SlirpTunnel::TapOpener->new($socket);
+    my $server = __PACKAGE__->new($socket);
     $server->_run();
 }
 

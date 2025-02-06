@@ -6,6 +6,7 @@ use Socket;
 use Net::OpenSSH;
 use Getopt::Long qw(GetOptions);
 
+use App::SlirpTunnel::Butler;
 use App::SlirpTunnel;
 
 my $reslirp_command = 'C:\\Program Files\\reSLIRP\\reslirp.exe';
@@ -29,14 +30,14 @@ if ($target_address =~ /^(.*?):(\d+)$/) {
     $target_address = $1;
 }
 
-my $master = App::SlirpTunnel->new();
-$master->start() or die "Failed to start master: $!";
-$master->hello() or die "Failed to send hello: $!";
-my ($device, $tap_fh) = $master->create_tap();
+my $butler = App::SlirpTunnel::Butler->new();
+$butler->start() or die "Failed to start butler: $!";
+$butler->hello() or die "Failed to send hello: $!";
+my ($device, $tap_fh) = $butler->create_tap();
 $tap_fh // die "Failed to setup tap interface: $!";
-$master->device_up($device) or die "Failed to bring up device: $!";
-$master->device_addr_add($device, '10.0.2.20', 24) or die "Failed to set device address: $!";
-$master->bye;
+$butler->device_up($device) or die "Failed to bring up device: $!";
+$butler->device_addr_add($device, '10.0.2.20', 24) or die "Failed to set device address: $!";
+$butler->bye;
 
 #sleep 100;
 
