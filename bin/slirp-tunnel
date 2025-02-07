@@ -5,8 +5,11 @@ use warnings;
 use Socket;
 use Net::OpenSSH;
 use Getopt::Long qw(GetOptions);
+use POSIX;
+use Net::DNS::Resolver;
 
 use App::SlirpTunnel::Butler;
+use App::SlirpTunnel::Loop;
 use App::SlirpTunnel;
 
 my $reslirp_command = 'C:\\Program Files\\reSLIRP\\reslirp.exe';
@@ -16,10 +19,19 @@ my @dump_flags;
 my $target_address;
 my $remote_port = 22;  # Default port
 
+my $remote_dns_server = '10.0.2.2';
+my $remote_gw = '10.0.2.2';
+my $local_ip = '10.0.2.30';
+my $local_netmask = 24;
+my @route_hosts;
+my @route_hosts_win;
+
 GetOptions( 'c|reslirp-cmd|reslirp-command=s' => \$reslirp_command,
             'd'   => sub { $debug_level++ },
             'D=s' => sub { push @dump_flags, $_[1] },
-            'p=s' => \$remote_port )  # New option for remote port
+            'p=s' => \$remote_port,
+            'H|route-host=s' => sub { push @route_hosts, $_[1] },
+            'W|route-hot-win=s' => sub { push @route_hosts_win, $_[1] } )
     or die "Usage: $0 [-c command] [-d] [-D arg] [-p remote_port] [target_address]";
 
 $target_address = shift @ARGV // "localhost";
@@ -33,11 +45,11 @@ if ($target_address =~ /^(.*?):(\d+)$/) {
 my $butler = App::SlirpTunnel::Butler->new();
 $butler->start() or die "Failed to start butler: $!";
 $butler->hello() or die "Failed to send hello: $!";
+$butler->screen_reset();
 my ($device, $tap_fh) = $butler->create_tap();
 $tap_fh // die "Failed to setup tap interface: $!";
 $butler->device_up($device) or die "Failed to bring up device: $!";
-$butler->device_addr_add($device, '10.0.2.20', 24) or die "Failed to set device address: $!";
-$butler->bye;
+$butler->device_addr_add($device, $local_ip, $local_netmask) or die "Failed to set device address: $!";
 
 #sleep 100;
 
@@ -51,12 +63,111 @@ $ssh->die_on_error;
 
 $ssh->system("echo hello from Windows!");
 
+my %net_mapping;
+if (@route_hosts_win) {
+    for my $host (@route_hosts_win) {
+        my ($fqdn, $addr) = App::SlirpTunnel::win_resolve($ssh, $host);
+        if (defined $addr) {
+            $net_mapping{$fqdn} = $addr;
+            warn "$fqdn resolved to $addr";
+        }
+        else {
+            warn"Failed to resolve $host";
+        }
+    }
+}
+
+
 # Building the remote command in multiple steps
 my @command = ($reslirp_command);
 push @command, ('-d') x $debug_level if $debug_level > 0;
 push @command, "-D$_" for @dump_flags;
 push @command, @ARGV;
 
+warn "Running remote command: @command\n";
+
 my ($socket, $pid) = $ssh->open2socket({quote_args => 1}, @command);
 
-App::SlirpTunnel::loop($tap_fh, $socket);
+# App::SlirpTunnel::Loop::run($tap_fh, $socket);
+
+my $loop_pid = fork;
+if (defined $loop_pid and $loop_pid == 0) {
+    sleep 100;
+    eval {
+        # open STDERR, ">/dev/null";
+        undef $butler;
+        App::SlirpTunnel::Loop::run($tap_fh, $socket);
+    };
+    if ($@) {
+        warn "Error in loop: $@";
+    }
+    warn "Loop terminated\n";
+    $ssh->stop({kill_ssh_on_timeout => 1});
+    POSIX::_exit(0);
+}
+if (!defined $loop_pid) {
+    die "Failed to fork: $!";
+}
+
+warn "Loop forked, pid: $loop_pid\n";
+
+# $ssh->disown_master(); # let the loop handle it!
+close $tap_fh;
+close $socket;
+
+if (@route_hosts) {
+    my $dns = Net::DNS::Resolver->new(nameservers => [$remote_dns_server], recurse => 1);
+    for my $host (@route_hosts) {
+        warn "Resolving $host using remote DNS\n";
+        my $error = "A record not found";
+        my $fqdn = App::SlirpTunnel::host_fqdn($host);
+        if (not defined $fqdn) {
+            $error = "Unable to find FQDN for $host";
+        }
+        else {
+            my $query = $dns->query($fqdn, 'A');
+            if ($query) {
+                for my $rr ($query->answer) {
+                    if ($rr->type eq 'A') {
+                        $net_mapping{$fqdn} = $rr->address;
+                        undef $error;
+                        last;
+                    }
+                }
+            }
+            else {
+                $error = $dns->errorstring
+            }
+        }
+        if (defined $error) {
+            warn "Failed to configure routing for $host: $error"
+        }
+    }
+}
+
+if (%net_mapping) {
+    # system "ip a";
+
+    my $user_name = getpwuid($<);
+    my $group_name = getgrgid($();
+    $butler->start_dnsmasq(listen_address => $local_ip,
+                           mapping => \%net_mapping,
+                           user => $user_name,
+                           group => $group_name );
+    $butler->resolvectl_dns(device => $device, dns => $local_ip);
+    for my $host (keys %net_mapping) {
+        $butler->resolvectl_domain(device => $device, domain => $host);
+        $butler->route_add(ip => $net_mapping{$host}, gw => $remote_gw, device => $device);
+    }
+}
+
+#$butler->bye;
+
+# system("reset");
+
+warn "Waiting for loop to terminate\n";
+
+waitpid($loop_pid, 0);
+
+warn "Loop terminaterd: $?\n";
+

@@ -40,6 +40,8 @@ sub _do_system {
 
 }
 
+sub _screen_reset__rpc { shift->_do_system("reset") }
+
 sub _device_up__rpc {
     my ($self, $request) = @_;
     my $device = $request->{device};
@@ -52,6 +54,52 @@ sub _device_addr_add__rpc {
     my $addr = $request->{addr};
     my $mask = $request->{mask};
     $self->_do_system("ip", "addr", "add", "$addr/$mask", "dev", $device);
+}
+
+sub _start_dnsmasq__rpc {
+    my ($self, $request) = @_;
+    my $listen_address = $request->{listen_address};
+    my $mapping = $request->{mapping};
+    my $user = $request->{user} // 'nobody';
+    my $group = $request->{group} // 'nogroup';
+
+    my @args = ('dnsmasq',
+                '--user='.$user,
+                '--group='.$group,
+                '--listen-address='.$listen_address,
+                '--no-hosts',
+                '--no-resolv',
+                '--bind-interfaces',
+                '--except-interface=lo',
+                '--log-queries',
+                '--server=',
+                '--no-dhcp-interface=*');
+    push @args, "--address=/$_/$mapping->{$_}" for keys %$mapping;
+    #push @args, "--host-record=$_,$mapping->{$_}" for keys %$mapping;
+    warn "running @args\n";
+    $self->_do_system(@args);
+}
+
+sub _resolvectl_domain__rpc {
+    my ($self, $request) = @_;
+    my $device = $request->{device};
+    my $domain = $request->{domain};
+    $self->_do_system("resolvectl", "domain", $device, "~$domain");
+}
+
+sub _resolvectl_dns__rpc {
+    my ($self, $request) = @_;
+    my $device = $request->{device};
+    my $dns = $request->{dns};
+    $self->_do_system("resolvectl", "dns", $device, $dns);
+}
+
+sub _route_add__rpc {
+    my ($self, $request) = @_;
+    my $device = $request->{device};
+    my $ip = $request->{ip};
+    my $gw = $request->{gw};
+    $self->_do_system("ip", "route", "add", $ip, "via", $gw, "dev", $device);
 }
 
 sub _bye__rpc {

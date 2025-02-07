@@ -89,19 +89,52 @@ sub create_tap {
     return ($device, $tap_fh);
 }
 
+sub _request_check_ok {
+    my $self = shift;
+    my $r = $self->_request(@_);
+    return $r->{status} eq 'ok'
+}
+
 sub device_up {
     my ($self, $device) = @_;
-    return $self->_request('device_up', device => $device);
+    return $self->_request_check_ok('device_up', device => $device);
 }
 
 sub device_addr_add {
     my ($self, $device, $addr, $mask) = @_;
-    return $self->_request('device_addr_add', device => $device, addr => $addr, mask => $mask);
+    return $self->_request_check_ok('device_addr_add', device => $device, addr => $addr, mask => $mask);
 }
 
 sub bye {
     my $self = shift;
     return $self->_request('bye');
 }
+
+sub add_a_record {
+    my($self, $name, $addr) = @_;
+    return $self->_request_check_ok('add_a_record', name => $name, addr => $addr);
+}
+
+sub start_dnsmasq {
+    my $self = shift;
+    return $self->_request_check_ok('start_dnsmasq', @_);
+}
+
+sub resolvectl_dns {
+    my $self = shift;
+    return $self->_request_check_ok('resolvectl_dns', @_);
+}
+
+sub resolvectl_domain {
+    my $self = shift;
+    return $self->_request_check_ok('resolvectl_domain', @_)
+}
+
+sub route_add {
+    my $self = shift;
+    return $self->_request_check_ok('route_add', @_);
+}
+
+sub screen_reset { shift->_request('screen_reset') }
 
 1;
