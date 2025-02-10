@@ -22,7 +22,7 @@ sub recv_packet {
     my $len = unpack("N", $header);
     my $data = $self->_read_bytes($len);
     utf8::decode($data);
-    warn "Packet received: $data\n";
+    # warn "Packet received: $data\n";
     my $r = JSON::decode_json($data);
     return $r;
 }
@@ -34,7 +34,7 @@ sub _read_bytes {
     while (length $buf < $len) {
         my $n = sysread($$self, $buf, $len - length $buf, length $buf);
         if (!defined $n) {
-            warn "read error, ignoring it: $!";
+            # warn "read error, ignoring it: $!";
             sleep 1;
         } elsif ($n == 0) {
             die "unexpected EOF";
@@ -46,13 +46,13 @@ sub _read_bytes {
 sub send_packet {
     my ($self, $data) = @_;
     my $json = JSON::encode_json($data);
-    warn "sending $json\n";
+    # warn "sending $json\n";
     utf8::encode($json);
     my $bytes = pack("N", length $json) . $json;
     while (length $bytes) {
         my $n = syswrite($$self, $bytes);
         if (!defined $n) {
-            warn "write error, ignoring: $!";
+            # warn "write error, ignoring: $!";
             sleep 1;
         }
         substr($bytes, 0, $n) = "";

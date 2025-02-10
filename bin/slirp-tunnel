@@ -2,172 +2,94 @@
 
 use strict;
 use warnings;
-use Socket;
-use Net::OpenSSH;
 use Getopt::Long qw(GetOptions);
-use POSIX;
-use Net::DNS::Resolver;
-
-use App::SlirpTunnel::Butler;
-use App::SlirpTunnel::Loop;
 use App::SlirpTunnel;
 
-my $reslirp_command = 'C:\\Program Files\\reSLIRP\\reslirp.exe';
-my $debug_arg;
-my $debug_level = 0;
-my @dump_flags;
-my $target_address;
-my $remote_port = 22;  # Default port
+my $remote_port;
+my $remote_user;
+my $remote_os;
+my $remote_shell;
+my $ssh_command;
+my @more_ssh_args;
+my $slirp_command;
+my @more_slirp_args;
 
-my $remote_dns_server = '10.0.2.2';
-my $remote_gw = '10.0.2.2';
-my $local_ip = '10.0.2.30';
-my $local_netmask = 24;
-my @route_hosts;
-my @route_hosts_win;
+my $remote_network;
+my $remote_netmask;
+my $remote_dns = '3';
+my $remote_gw = '2';
+my $local_ip = '30';
+my $device;
+my @route_hosts_local;
+my @route_hosts_dns;
+my @route_hosts_ssh;
+my $log_to_stderr;
+my $log_file;
+my $log_level = 'warn';
 
-GetOptions( 'c|reslirp-cmd|reslirp-command=s' => \$reslirp_command,
-            'd'   => sub { $debug_level++ },
-            'D=s' => sub { push @dump_flags, $_[1] },
-            'p=s' => \$remote_port,
-            'H|route-host=s' => sub { push @route_hosts, $_[1] },
-            'W|route-hot-win=s' => sub { push @route_hosts_win, $_[1] } )
-    or die "Usage: $0 [-c command] [-d] [-D arg] [-p remote_port] [target_address]";
+sub parse_network {
+    my $arg = shift;
+    $arg =~ /^(\d+\.\d+\.\d+\.\d+)(?:\/(\d+))?$/ or die "Bar network argument: $arg";
+    $remote_network = $1;
+    $remote_netmask = $2 if defined $2;
+}
 
-$target_address = shift @ARGV // "localhost";
+GetOptions( 'C|slirp-cmd|slirp-command=s' => \$slirp_command,
+            's|ssh-cmd|ssh-command=s' => \$ssh_command,
+            'R|remote-os=s' => \$remote_os,
+            'S|remote-shell=s' => \$remote_shell,
+            'n|remote-network=s' => sub { parse_network($_[1]) },
+            'm|remote-netmask=s' => \$remote_netmask,
+            'g|remote-gw=s' => \$remote_gw,
+            'd|remote-dns=s' => \$remote_dns,
+            'a|local-ip=s' => \$local_ip,
+            'i|tap-device=s' => \$device,
+            's|ssh-arg=s' => sub { push @more_ssh_args, $_[1] },
+            'r|slirp-arg=s' => sub { push @more_slirp_args, $_[1] },
+            'E|log-to-stderr' => \$log_to_stderr,
+            'L|log-file=s' => \$log_file,
+            'D|log-level=s' => \$log_level,
+            'l|remote-user=s' => \$remote_user,
+            'p|remote-port=s' => \$remote_port,
+            'h|route-host|route-host-local=s' => sub { push @route_hosts_local, $_[1] },
+            'H|route-host-dns=s' => sub { push @route_hosts_dns, $_[1] },
+            'W|route-host-ssh=s' => sub { push @route_hosts_ssh, $_[1] } )
+    or die "Usage: $0 [-c command] [-d] [-D arg] [-p remote_port] [target_address]\n";
+
+my $remote_host = shift @ARGV // "localhost";
 
 # Allow remote address to accept port in the format hostname:port
-if ($target_address =~ /^(.*?):(\d+)$/) {
+if ($remote_host =~ /^(.*?):(\d+)$/) {
     $remote_port = $2;
-    $target_address = $1;
+    $remote_host = $1;
 }
 
-my $butler = App::SlirpTunnel::Butler->new();
-$butler->start() or die "Failed to start butler: $!";
-$butler->hello() or die "Failed to send hello: $!";
-$butler->screen_reset();
-my ($device, $tap_fh) = $butler->create_tap();
-$tap_fh // die "Failed to setup tap interface: $!";
-$butler->device_up($device) or die "Failed to bring up device: $!";
-$butler->device_addr_add($device, $local_ip, $local_netmask) or die "Failed to set device address: $!";
+$log_level =~ /^(debug|info|warn|error)$/ or die "Invalid log level: $log_level\n";
 
-#sleep 100;
-
-warn "Tap device received: ".fileno($tap_fh)."\n";
-
-sleep 1;
-warn "Starting SSH\n";
-
-my $ssh = Net::OpenSSH->new($target_address, port => $remote_port, remote_shell => 'MSWin');
-$ssh->die_on_error;
-
-$ssh->system("echo hello from Windows!");
-
-my %net_mapping;
-if (@route_hosts_win) {
-    for my $host (@route_hosts_win) {
-        my ($fqdn, $addr) = App::SlirpTunnel::win_resolve($ssh, $host);
-        if (defined $addr) {
-            $net_mapping{$fqdn} = $addr;
-            warn "$fqdn resolved to $addr";
-        }
-        else {
-            warn"Failed to resolve $host";
-        }
-    }
+if (defined $device) {
+    $device = "tap$device" if $device =~ /^\d+$/;
 }
 
+my $tunnel = App::SlirpTunnel->new(app_name => 'slirp-tunnel',
+                                   remote_port => $remote_port,
+                                   remote_host => $remote_host,
+                                   remote_user => $remote_user,
+                                   remote_os => $remote_os,
+                                   remote_network => $remote_network,
+                                   remote_netmask => $remote_netmask,
+                                   remote_gw => $remote_gw,
+                                   remote_dns => $remote_dns,
+                                   local_ip => $local_ip,
+                                   ssh_command => $ssh_command,
+                                   more_ssh_args => \@more_ssh_args,
+                                   more_slirp_args => \@more_slirp_args,
+                                   slirp_command => $slirp_command,
+                                   route_hosts_local => \@route_hosts_local,
+                                   route_hosts_dns => \@route_hosts_dns,
+                                   route_hosts_ssh => \@route_hosts_ssh,
+                                   log_to_stderr => $log_to_stderr,
+                                   log_file => $log_file,
+                                   log_level => $log_level);
 
-# Building the remote command in multiple steps
-my @command = ($reslirp_command);
-push @command, ('-d') x $debug_level if $debug_level > 0;
-push @command, "-D$_" for @dump_flags;
-push @command, @ARGV;
-
-warn "Running remote command: @command\n";
-
-my ($socket, $pid) = $ssh->open2socket({quote_args => 1}, @command);
-
-# App::SlirpTunnel::Loop::run($tap_fh, $socket);
-
-my $loop_pid = fork;
-if (defined $loop_pid and $loop_pid == 0) {
-    sleep 100;
-    eval {
-        # open STDERR, ">/dev/null";
-        undef $butler;
-        App::SlirpTunnel::Loop::run($tap_fh, $socket);
-    };
-    if ($@) {
-        warn "Error in loop: $@";
-    }
-    warn "Loop terminated\n";
-    $ssh->stop({kill_ssh_on_timeout => 1});
-    POSIX::_exit(0);
-}
-if (!defined $loop_pid) {
-    die "Failed to fork: $!";
-}
-
-warn "Loop forked, pid: $loop_pid\n";
-
-# $ssh->disown_master(); # let the loop handle it!
-close $tap_fh;
-close $socket;
-
-if (@route_hosts) {
-    my $dns = Net::DNS::Resolver->new(nameservers => [$remote_dns_server], recurse => 1);
-    for my $host (@route_hosts) {
-        warn "Resolving $host using remote DNS\n";
-        my $error = "A record not found";
-        my $fqdn = App::SlirpTunnel::host_fqdn($host);
-        if (not defined $fqdn) {
-            $error = "Unable to find FQDN for $host";
-        }
-        else {
-            my $query = $dns->query($fqdn, 'A');
-            if ($query) {
-                for my $rr ($query->answer) {
-                    if ($rr->type eq 'A') {
-                        $net_mapping{$fqdn} = $rr->address;
-                        undef $error;
-                        last;
-                    }
-                }
-            }
-            else {
-                $error = $dns->errorstring
-            }
-        }
-        if (defined $error) {
-            warn "Failed to configure routing for $host: $error"
-        }
-    }
-}
-
-if (%net_mapping) {
-    # system "ip a";
-
-    my $user_name = getpwuid($<);
-    my $group_name = getgrgid($();
-    $butler->start_dnsmasq(listen_address => $local_ip,
-                           mapping => \%net_mapping,
-                           user => $user_name,
-                           group => $group_name );
-    $butler->resolvectl_dns(device => $device, dns => $local_ip);
-    for my $host (keys %net_mapping) {
-        $butler->resolvectl_domain(device => $device, domain => $host);
-        $butler->route_add(ip => $net_mapping{$host}, gw => $remote_gw, device => $device);
-    }
-}
-
-#$butler->bye;
-
-# system("reset");
-
-warn "Waiting for loop to terminate\n";
-
-waitpid($loop_pid, 0);
-
-warn "Loop terminaterd: $?\n";
+$tunnel->go;
 
