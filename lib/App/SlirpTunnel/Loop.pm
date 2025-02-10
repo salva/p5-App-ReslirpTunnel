@@ -2,6 +2,7 @@ package App::SlirpTunnel::Loop;
 
 use strict;
 use warnings;
+use POSIX;
 
 use parent 'App::SlirpTunnel::Logger';
 
@@ -17,6 +18,51 @@ sub hexdump { unpack "H*", $_[0] }
 
 sub run {
     my ($self, $tap_handle, $ssh_handle, $ssh_err_handle) = @_;
+    $self->_log(debug => "tap_handle: $tap_handle, ssh_handle: $ssh_handle, ssh_err_handle: $ssh_err_handle");
+
+    my $pid = fork();
+    if (defined $pid and $pid == 0) {
+        eval {
+            # We close everything but the TAP, SSH and SSH error handles
+            # We also need to reopen the logfile.
+            undef $self->{log};
+            $self->_close_fds_but($tap_handle, $ssh_handle, $ssh_err_handle);
+            $self->_init_logger(log_level => $self->{log_level},
+                                log_to_stderr => $self->{log_to_stderr},
+                                log_file => $self->{log_file},
+                                log_prefix => $self->{log_prefix});
+
+            eval {
+                $self->_log(debug => 'looping...');
+                $self->_loop($tap_handle, $ssh_handle, $ssh_err_handle);
+            };
+            if ($@) {
+                $self->_log(error => "IO loop failed", $@);
+            }
+        };
+        POSIX::_exit(0);
+    }
+    elsif (not defined $pid) {
+        $self->_log(error => "Fork failed", $!);
+        return;
+    }
+    $self->{pid} = $pid;
+    return $pid;
+}
+
+sub _close_fds_but {
+    my ($self, @keep_fhs) = @_;
+    my @keep_fds = map fileno($_), @keep_fhs;
+    $self->_log(debug => "Keeping fds: @keep_fds");
+    my $max_fd = POSIX::sysconf(POSIX::_SC_OPEN_MAX) || 1024;
+    for my $fd (3 .. $max_fd) {
+        POSIX::close($_)
+            unless grep { $fd == $_ } @keep_fds;
+    }
+}
+
+sub _loop {
+    my ($self, $tap_handle, $ssh_handle, $ssh_err_handle) = @_;
 
     my $tap2ssh_buff = '';
     my $ssh2tap_buff = '';
@@ -28,33 +74,55 @@ sub run {
     my $ssh_fd = fileno($ssh_handle);
     my $err_fd = fileno($ssh_err_handle);
 
-    while (1) {
+    my $err_open = 1;
+    my $tunnel_closed;
+    my $close_later;
+    my $err_close_time_limit;
+
+    while ($err_open) {
+        my $ssh2tap_pkt_len;
         my $rfds = '';
         my $wfds = '';
         my $efds = $rfds;
 
-        vec($rfds, $ssh_fd, 1) = 1 if length($ssh2tap_buff) < $max_buff_size;
-        vec($rfds, $tap_fd, 1) = 1 if length($tap2ssh_buff) < $max_buff_size;
         vec($rfds, $err_fd, 1) = 1;
+        unless ($close_later) {
+            vec($rfds, $ssh_fd, 1) = 1 if length($ssh2tap_buff) < $max_buff_size;
+            vec($rfds, $tap_fd, 1) = 1 if length($tap2ssh_buff) < $max_buff_size;
 
-        my $ssh2tap_pkt_len;
-        if (length($ssh2tap_buff) >= 2) {
-            $ssh2tap_pkt_len = unpack("n", $ssh2tap_buff);
-            if (length($ssh2tap_buff) >= $ssh2tap_pkt_len + 2) {
-                vec($wfds, $tap_fd, 1) = 1;
+            if (length($ssh2tap_buff) >= 2) {
+                $ssh2tap_pkt_len = unpack("n", $ssh2tap_buff);
+                if (length($ssh2tap_buff) >= $ssh2tap_pkt_len + 2) {
+                    vec($wfds, $tap_fd, 1) = 1;
+                }
             }
-        }
-        if (length($tap2ssh_buff) > 0) {
-            vec($wfds, $ssh_fd, 1) = 1;
+            if (length($tap2ssh_buff) > 0) {
+                vec($wfds, $ssh_fd, 1) = 1;
+            }
         }
 
         my $nfound = select($rfds, $wfds, $efds, 15);
-        do {
-            local $!;
-        };
+        next if $nfound <= 0;
 
-        if ($nfound <= 0) {
-            next;
+        if (vec($rfds, $err_fd, 1)) {
+            my $n = sysread($ssh_err_handle, $err_buff, $max_buff_size, length($err_buff));
+            if (!defined $n) {
+                $self->_log(warn => "Read from SSH error channel failed", $!);
+            }
+            elsif ($n == 0) {
+                $self->_log(info => "SSH error channel closed");
+                $close_later++;
+            }
+            else {
+                while ($err_buff =~ s/^(.*)\n//) {
+                    next if $1 =~ /^\s*$/;
+                    $self->_log(info => "Remote stderr", $1);
+                }
+                while (length($err_buff) >= 1500) {
+                    $self->_log(ingo => "Remote stderr", substr($err_buff, 0, 1500)." (truncated)");
+                    substr($err_buff, 0, 1500) = '';
+                }
+            }
         }
 
         if (vec($rfds, $ssh_fd, 1)) {
@@ -64,9 +132,10 @@ sub run {
             }
             elsif ($n == 0) {
                 $self->_log(warn => "SSH closed connection");
-                # TODO: handle this!
+                $close_later++;
             }
         }
+
         if (vec($rfds, $tap_fd, 1)) {
             my $n = sysread($tap_handle, $pkt_buff, $max_buff_size);
             if (!defined $n) {
@@ -74,12 +143,13 @@ sub run {
             }
             elsif ($n == 0) {
                 $self->_log(warn => "TAP closed connection");
-                # TODO: handle this!
+                $close_later++;
             }
             else {
                 $tap2ssh_buff .= pack("n", $n) . $pkt_buff;
             }
         }
+
         if (vec($wfds, $ssh_fd, 1)) {
             my $n = syswrite($ssh_handle, $tap2ssh_buff, length($tap2ssh_buff));
             if (!defined $n) {
@@ -87,12 +157,13 @@ sub run {
             }
             elsif ($n == 0) {
                 $self->_log(warn => "SSH closed connection");
-                die "SSH closed connection";
+                $close_later++;
             }
             else {
                 substr($tap2ssh_buff, 0, $n) = '';
             }
         }
+
         if(vec($wfds, $tap_fd, 1)) {
             if (not defined $ssh2tap_pkt_len or length($ssh2tap_buff) < $ssh2tap_pkt_len + 2) {
                 $self->_log(warn => "Unexpected write flag for TAP");
@@ -106,30 +177,26 @@ sub run {
                 }
                 elsif ($n == 0) {
                     $self->_log(warn => "TAP closed", $!);
-                    die "TAP closed";
+                    $close_later++;
                 }
             }
         }
-        if (vec($rfds, $err_fd, 1)) {
-            my $n = sysread($ssh_err_handle, $err_buff, $max_buff_size, length($err_buff));
-            if (!defined $n) {
-                $self->_log(warn => "Read from SSH error channel failed", $!);
-            }
-            elsif ($n == 0) {
-                $self->_log(warn => "SSH error channel closed");
-                die "SSH error channel closed";
-            }
-            else {
-                while ($err_buff =~ s/^(.*)\n//) {
-                    next if $1 =~ /^\s*$/;
-                    $self->_log(info => "Remote stderr", $1);
-                }
-                while (length($err_buff) >= 1500) {
-                    $self->_log(ingo => "Remote stderr", substr($err_buff, 0, 1500)." (truncated)");
-                    substr($err_buff, 0, 1500) = '';
-                }
-            }
+
+        if ($close_later) {
+            $self->_log(debug => "Closing tap and ssh sockets");
+            close($tap_handle);
+            close($ssh_handle);
+            $tunnel_closed++;
+            undef $close_later;
+            $err_close_time_limit = time + 10;
         }
+
+        if ($tunnel_closed and time > $err_close_time_limit) {
+            $self->_log(debug => "Closing error socket");
+            close($ssh_err_handle);
+            $err_open = 0;
+        }
+        $err_open-- if $tunnel_closed;
     }
 }
 

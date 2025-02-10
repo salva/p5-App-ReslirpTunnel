@@ -29,6 +29,8 @@ sub new {
 
 sub go {
     my $self = shift;
+    # use Data::Dumper;
+    # warn "args:\n".Dumper($self->{args});
 
     eval {
         $self->_init_xdg;
@@ -50,7 +52,7 @@ sub go {
 
         $self->_init_loop;
 
-        $self->_init_net_mappings;
+        $self->_config_net_mappings;
 
         $self->_init_dnsmasq;
 
@@ -141,8 +143,11 @@ sub _init_butler {
                                                                  log_to_stderr => $self->{log_to_stderr},
                                                                  log_file => $self->{log_file});
 
-    $butler->start
-        or $self->_die("Failed to start butler");
+    $self->{sudo_pid} = $butler->start
+        // $self->_die("Failed to start butler");
+
+    $self->_log(info => "Butler started, sudo PID: $self->{sudo_pid}");
+
     $butler->hello
         or $self->_die("Failed to say hello to butler");
     $self->_log(info => "Elevated slave process started and ready");
@@ -441,7 +446,52 @@ sub _init_loop {
                                            log_to_stderr => $self->{log_to_stderr},
                                            log_file => $self->{log_file});
 
-    $loop->run($self->{tap_fh}, $self->{slirp_socket}, $self->{slirp_stderr});
+    my $pid = $loop->run($self->{tap_fh}, $self->{slirp_socket}, $self->{slirp_stderr})
+        //$self->_die("Failed to start IO loop process");
+
+    $self->_log(info => "IO loop process started, PID: $pid");
+    $self->{loop_pid} = $pid;
+}
+
+sub _wait_for_everything {
+    my $self = shift;
+    my @procs = qw(sudo slirp loop);
+    my @pids = grep defined, $self->{"${_}_pid"}, @procs;
+    while (1) {
+        my $kid = waitpid(-1, WNOHANG);
+        if ($kid > 0) {
+            my $proc = $self->_find_process_by_pid($kid);
+            $self->_log(info => "Process $proc (PID: $kid) finished");
+            @procs = grep { $_ ne $proc } @procs;
+            last unless @procs;
+        }
+        sleep 1;
+    }
+        
+    my @pids = (0, 0, 15, 15, 15, 9, 9, 9);
+
+    
+}
+
+sub _kill_everything {
+    my $self = shift;
+    my @signals = (0, 0, 15, 15, 15, 9, 9, 9);
+    for my $process (qw(loop slirp dnsmasq)) {
+        my $pid = $self->{"${process}_pid"} // next;
+        $self->_log(debug => "Waiting for process $process (PID: $pid) to finish");
+        next unless kill(0 => $pid);
+        for my $signal (@signals) {
+            my $kid = waitpid($pid, WNOHANG);
+            if ($kid == $pid) {
+                $self->_log(debug => "Process $process exited and captured");
+                last;
+            }
+            sleep 1;
+            $self->_log(debug => "Sending signal $signal to process $pid");
+            kill $signal => $pid;
+        }
+    }
+    $self->_log(info => "All processes finished");
 }
 
 1;

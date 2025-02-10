@@ -43,7 +43,7 @@ sub _start_slave {
         or $self->_die("socketpair failed", $!);
 
     my $pid = fork();
-    if (defined $pid && $pid == 0) {
+    if (defined $pid and $pid == 0) {
         close($parent_socket);
         POSIX::dup2(fileno($child_socket), 1)
             or $self->_die("dup2 failed", $!);
@@ -67,7 +67,7 @@ sub _start_slave {
     sleep(1); # TODO: is this really necessary?
 
     $self->{rpc} = App::SlirpTunnel::RPC->new($parent_socket);
-    1;
+    return $pid;
 }
 
 sub _request {
