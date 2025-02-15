@@ -35,7 +35,6 @@ sub parse_network {
     $remote_network = $1;
     $remote_netmask = $2 if defined $2;
 }
-
 GetOptions( 'C|slirp-cmd|slirp-command=s' => \$slirp_command,
             's|ssh-cmd|ssh-command=s' => \$ssh_command,
             'R|remote-os=s' => \$remote_os,
@@ -58,8 +57,30 @@ GetOptions( 'C|slirp-cmd|slirp-command=s' => \$slirp_command,
             'W|route-host-ssh=s' => sub { push @route_hosts_ssh, $_[1] },
             'f|run-in-foreground' => \$run_in_foreground,
             'dont-close-stdio' => \$dont_close_stdio )
-    or die "Usage: $0 [-c command] [-d] [-D arg] [-p remote_port] [target_address]\n";
-
+    or die "Usage: $0 [options]\n" .
+            "Options:\n" .
+            "  -C, --slirp-cmd, --slirp-command <command>    Specify the slirp command\n" .
+            "  -s, --ssh-cmd, --ssh-command <command>        Specify the SSH command\n" .
+            "  -R, --remote-os <os>                          Specify the remote operating system (autodetected by default)\n" .
+            "  -S, --remote-shell <shell>                    Specify the remote shell (autodetected by default)\n" .
+            "  -n, --remote-network <network>                Specify the remote network (defaults to 10.0.2.0/24)\n" .
+            "  -m, --remote-netmask <netmask>                Specify the remote netmask (defaults to 255.255.255.0)\n" .
+            "  -g, --remote-gw <gateway>                     Specify the remote gateway (defaults to 10.0.2.2)\n" .
+            "  -d, --remote-dns <dns>                        Specify the remote DNS (defaults to 10.0.2.3)\n" .
+            "  -a, --local-ip <ip>                           Specify the local IP (defaults to 10.0.2.30)\n" .
+            "  -i, --tap-device <device>                     Specify the tap device (autodetected by default)\n" .
+            "  -s, --ssh-arg <arg>                           Specify additional SSH arguments\n" .
+            "  -r, --slirp-arg <arg>                         Specify additional slirp arguments\n" .
+            "  -E, --log-to-stderr                           Log to standard error\n" .
+            "  -L, --log-file <file>                         Specify the log file (by default logs to a file in ~/.local/state/slirp-tunnel/logs)\n" .
+            "  -D, --log-level <level>                       Specify the log level\n" .
+            "  -l, --remote-user <user>                      Specify the remote user\n" .
+            "  -p, --remote-port <port>                      Specify the remote port (defaults to 22)\n" .
+            "  -h, --route-host, --route-host-local <host>   Add route for host (resolve locally)\n" .
+            "  -H, --route-host-dns <host>                   Add route for host (resolve using remote DNS)\n" .
+            "  -W, --route-host-ssh <host>                   Add route for host (resolve using remote command run through SSH)\n" .
+            "  -f, --run-in-foreground                       Run in foreground\n" .
+            "  --dont-close-stdio                            Don't close stdio\n";
 my $remote_host = shift @ARGV // "localhost";
 
 # Allow remote address to accept port in the format hostname:port
