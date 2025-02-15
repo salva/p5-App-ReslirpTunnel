@@ -150,11 +150,22 @@ sub new {
     $self->_init_logger(log_level => $args{log_level},
                         log_to_stderr => $args{log_to_stderr},
                         log_file => $args{log_file},
+                        log_uid => $args{log_uid},
                         log_prefix => "SlirpTunnel::ElevatedSlave");
 
     $self->{rpc} = App::SlirpTunnel::RPC->new($args{socket});
     $self->_log(info => "Evalated slave started");
     $self
+}
+
+sub _init_logger {
+    my ($self, %args) = @_;
+    # We need to open a different log file for the elevated slave as
+    # we are running under a different user (root) and don't have
+    # permission to write to the user's log file.
+
+    $args{log_file} =~ s/((?:\.[^\.]+)?)$/.elevated$1/ if defined $args{log_file};
+    $self->SUPER::_init_logger(%args);
 }
 
 sub _hex2arg {
@@ -166,21 +177,40 @@ sub _hex2arg {
 }
 
 sub start {
+    # Recover socket from the file descriptor passed by the parent
     POSIX::dup2(1, 3);
     POSIX::dup2(2, 1);
-    my $socket = IO::Socket::UNIX->new_from_fd(3, "r+")
-        or die "Failed to create socket: $!";
 
-    # warn "ARGV = @main::ARGV\n";
-    my $log_level = _hex2arg(shift @main::ARGV);
-    my $log_to_stderr = _hex2arg(shift @main::ARGV);
-    my $log_file = ($log_to_stderr ? undef : _hex2arg(shift @main::ARGV));
+    $SIG{INT} = 'IGNORE';
 
-    my $server = __PACKAGE__->new(socket => $socket,
-                                  log_level => $log_level,
-                                  log_to_stderr => $log_to_stderr,
-                                  log_file => $log_file);
-    $server->_run();
+    # Detach from the controlling terminal
+    POSIX::setsid();
+
+    my $pid = fork;
+    if (defined $pid and $pid == 0) {
+        my $socket = IO::Socket::UNIX->new_from_fd(3, "r+")
+            or die "Failed to create socket: $!";
+
+        my $dont_close_stdio = _hex2arg(shift @main::ARGV);
+        my $log_level = _hex2arg(shift @main::ARGV);
+        my $log_to_stderr = _hex2arg(shift @main::ARGV);
+        my $log_file = ($log_to_stderr ? undef : _hex2arg(shift @main::ARGV));
+        my $log_uid = ($log_to_stderr ? undef : _hex2arg(shift @main::ARGV));
+
+        unless ($dont_close_stdio) {
+            open STDIN, '<', '/dev/null';
+            open STDOUT, '>', '/dev/null';
+            open STDERR, '>', '/dev/null' unless $log_to_stderr;
+        }
+
+        my $server = __PACKAGE__->new(socket => $socket,
+                                      dont_close_stdio => $dont_close_stdio,
+                                      log_level => $log_level,
+                                      log_to_stderr => $log_to_stderr,
+                                      log_file => $log_file,
+                                      log_uid => $log_uid);
+        $server->_run();
+    }
+    POSIX::_exit(0);
 }
-
 1;

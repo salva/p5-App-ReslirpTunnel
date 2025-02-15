@@ -37,35 +37,25 @@ sub go {
 
         $self->_init_logger;
         $self->_log(info => "Starting SlirpTunnel");
-
         $self->_set_signal_handlers;
-
         $self->_init_config;
-
         $self->_init_butler;
-
-        $self->_init_tap_device;
-
         $self->_init_ssh;
-
+        $self->_send_to_background;
+        $self->_init_tap_device;
         $self->_init_slirp;
-
         $self->_init_loop;
-
         $self->_config_net_mappings;
-
         $self->_init_dnsmasq;
-
         $self->_init_resolver_rules;
-
         $self->_init_routes;
-
-        $self->_wait_for_everything;
+        $self->_wait_for_something;
+        $self->_log(info => "Terminating SlirpTunnel");
     };
     if ($@) {
         die "Something went wrong: $@\n";
     }
-    # TODO: clean up!
+    $self->_kill_everything;
 }
 
 sub _init_xdg {
@@ -87,12 +77,24 @@ sub _init_logger {
 }
 
 sub _set_signal_handlers {
-    # TODO
+    my $self = shift;
+    my $signal_count = 0;
+    $self->{signal_count_ref} = \$signal_count;
+    $self->{signal_handler} = sub {
+        $signal_count++;
+        $self->_log(info => "Signal received, count: $signal_count");
+    };
+
+    $SIG{INT} = $self->{signal_handler};
+    $SIG{TERM} = $self->{signal_handler};
 }
 
 sub _init_config {
     my $self = shift;
     my $args = $self->{args};
+
+    $self->{run_in_foreground} = $args->{run_in_foreground} // 0;
+    $self->{dont_close_stdio} = $args->{dont_close_stdio} // 0;
 
     $self->{remote_host} = $args->{remote_host};
     $self->{remote_port} = $args->{remote_port};
@@ -139,18 +141,47 @@ sub __ip_to_int {
 
 sub _init_butler {
     my $self = shift;
-    my $butler = $self->{butler} = App::SlirpTunnel::Butler->new(log_level => $self->{log_level},
+    my $butler = $self->{butler} = App::SlirpTunnel::Butler->new(dont_close_stdio => $self->{dont_close_stdio},
+                                                                 log_level => $self->{log_level},
                                                                  log_to_stderr => $self->{log_to_stderr},
                                                                  log_file => $self->{log_file});
 
-    $self->{sudo_pid} = $butler->start
-        // $self->_die("Failed to start butler");
-
-    $self->_log(info => "Butler started, sudo PID: $self->{sudo_pid}");
-
+    $butler->start or $self->_die("Failed to start butler");
     $butler->hello
         or $self->_die("Failed to say hello to butler");
     $self->_log(info => "Elevated slave process started and ready");
+}
+
+sub _send_to_background {
+    my $self = shift;
+    return if $self->{run_in_foreground};
+
+    $self->_log(info => "Moving to background");
+    POSIX::setsid();
+
+    my $pid = fork // $self->_die("Unable to move process into the background", $!);
+    if ($pid == 0) {
+        $SIG{INT} = $self->{signal_handler};
+        $SIG{TERM} = $self->{signal_handler};
+
+        unless ($self->{dont_close_stdio}) {
+            open STDIN, '<', '/dev/null';
+            open STDOUT, '>', '/dev/null';
+            open STDERR, '>', '/dev/null' unless $self->{log_to_stderr};
+        }
+
+        $self->{log_prefix} = "SlirpTunnel::Child";
+
+        return 1; # Return in the child!!!
+    }
+    else {
+        eval {
+            syswrite STDERR, "$0 moved to background, PID: $pid\n";
+            $self->_log(debug => "First process exiting");
+        };
+
+        POSIX::_exit(0);
+    }
 }
 
 sub _init_ssh {
@@ -172,6 +203,10 @@ sub _init_ssh {
         $self->_die("No remote OS specified and unable to autodetect it");
     $self->{remote_shell} = $self->{args}{remote_shell} // $self->_autodetect_remote_shell //
         $self->_die("No remote shell specified and unable to autodetect it");
+
+    my $ssh_master_pid = $self->{ssh}->get_master_pid;
+    $self->_log(debug => "SSH master PID", $ssh_master_pid);
+    $self->{ssh_master_pid} = $ssh_master_pid;
 }
 
 sub _autodetect_remote_os {
@@ -453,29 +488,54 @@ sub _init_loop {
     $self->{loop_pid} = $pid;
 }
 
-sub _wait_for_everything {
-    my $self = shift;
-    my @procs = qw(sudo slirp loop);
-    my @pids = grep defined, $self->{"${_}_pid"}, @procs;
-    while (1) {
-        my $kid = waitpid(-1, WNOHANG);
-        if ($kid > 0) {
-            my $proc = $self->_find_process_by_pid($kid);
-            $self->_log(info => "Process $proc (PID: $kid) finished");
-            @procs = grep { $_ ne $proc } @procs;
-            last unless @procs;
+sub _find_process_by_pid {
+    my ($self, $pid) = @_;
+    for my $process (qw(slirp loop dnsmasq)) {
+        my $process_pid = $self->{"${process}_pid"};
+        if (defined $process_pid) {
+            return $process if $self->{"${process}_pid"} == $pid;
         }
-        sleep 1;
     }
-        
-    my @pids = (0, 0, 15, 15, 15, 9, 9, 9);
+    return;
+}
 
-    
+sub _wait_for_something {
+    my $self = shift;
+    $self->_log(debug => "Waiting for some child to exit");
+    while (not ${$self->{signal_count_ref}}) {
+        my $kid = waitpid(-1, WNOHANG);
+        if ($kid <= 0) {
+            # $self->_log(debug => "waitpid", $kid);
+            $self->_log(debug => "waitpid failed", $!) if $kid < 0;
+            select undef, undef, undef, 5;
+        }
+        else {
+            $self->_log(debug => "process $kid exited, rc", $? >> 8);
+            for my $proc (qw(slirp loop ssh_master)) {
+                my $proc_pid = $self->{"${proc}_pid"};
+                if (defined $proc_pid and $kid == $proc_pid) {
+                    $self->_log(info => "Process $proc (PID: $kid) finished");
+                    delete $self->{"${proc}_pid"};
+
+                    $self->{ssh}->master_exited if $proc eq 'ssh_master';
+                    return;
+                }
+            }
+            $self->_log(warn => "Unknown process with PID $kid finished");
+        }
+    }
 }
 
 sub _kill_everything {
     my $self = shift;
+    $self->_log(debug => "killing everything!");
     my @signals = (0, 0, 15, 15, 15, 9, 9, 9);
+
+    if (defined(my $ssh = $self->{ssh})) {
+        $ssh->disconnect;
+        delete $self->{ssh_master_pid};
+    }
+
     for my $process (qw(loop slirp dnsmasq)) {
         my $pid = $self->{"${process}_pid"} // next;
         $self->_log(debug => "Waiting for process $process (PID: $pid) to finish");
@@ -483,7 +543,7 @@ sub _kill_everything {
         for my $signal (@signals) {
             my $kid = waitpid($pid, WNOHANG);
             if ($kid == $pid) {
-                $self->_log(debug => "Process $process exited and captured");
+                $self->_log(debug => "Process $process exited and captured", $?);
                 last;
             }
             sleep 1;

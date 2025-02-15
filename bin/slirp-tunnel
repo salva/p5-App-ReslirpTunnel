@@ -26,6 +26,8 @@ my @route_hosts_ssh;
 my $log_to_stderr;
 my $log_file;
 my $log_level = 'warn';
+my $dont_close_stdio;
+my $run_in_foreground;
 
 sub parse_network {
     my $arg = shift;
@@ -53,7 +55,9 @@ GetOptions( 'C|slirp-cmd|slirp-command=s' => \$slirp_command,
             'p|remote-port=s' => \$remote_port,
             'h|route-host|route-host-local=s' => sub { push @route_hosts_local, $_[1] },
             'H|route-host-dns=s' => sub { push @route_hosts_dns, $_[1] },
-            'W|route-host-ssh=s' => sub { push @route_hosts_ssh, $_[1] } )
+            'W|route-host-ssh=s' => sub { push @route_hosts_ssh, $_[1] },
+            'f|run-in-foreground' => \$run_in_foreground,
+            'dont-close-stdio' => \$dont_close_stdio )
     or die "Usage: $0 [-c command] [-d] [-D arg] [-p remote_port] [target_address]\n";
 
 my $remote_host = shift @ARGV // "localhost";
@@ -89,7 +93,10 @@ my $tunnel = App::SlirpTunnel->new(app_name => 'slirp-tunnel',
                                    route_hosts_ssh => \@route_hosts_ssh,
                                    log_to_stderr => $log_to_stderr,
                                    log_file => $log_file,
-                                   log_level => $log_level);
+                                   log_level => $log_level,
+                                   run_in_foreground => $run_in_foreground,
+                                   dont_close_stdio => $dont_close_stdio,
+                                   device => $device);
 
 $tunnel->go;
 

@@ -23,22 +23,27 @@ sub run {
     my $pid = fork();
     if (defined $pid and $pid == 0) {
         eval {
-            # We close everything but the TAP, SSH and SSH error handles
-            # We also need to reopen the logfile.
-            undef $self->{log};
-            $self->_close_fds_but($tap_handle, $ssh_handle, $ssh_err_handle);
-            $self->_init_logger(log_level => $self->{log_level},
-                                log_to_stderr => $self->{log_to_stderr},
-                                log_file => $self->{log_file},
-                                log_prefix => $self->{log_prefix});
-
+            # We use a double eval because we want to catch any
+            # errors, even those due to a failed logging call!
             eval {
-                $self->_log(debug => 'looping...');
-                $self->_loop($tap_handle, $ssh_handle, $ssh_err_handle);
+                # We close everything but the TAP, SSH, SSH error and log handles
+                my @keep_fhs = ($tap_handle, $ssh_handle, $ssh_err_handle);
+                my $log_fh = eval { $self->{log}{adapter}{fh} };
+                push @keep_fhs, $log_fh if defined $log_fh;
+
+                $self->_close_fds_but(@keep_fhs);
+                eval {
+                    $SIG{INT} = 'IGNORE';
+                    $self->_log(debug => 'looping...');
+                    $self->_loop($tap_handle, $ssh_handle, $ssh_err_handle);
+                };
+                if ($@) {
+                    $self->_log(error => "IO loop failed", $@);
+                }
             };
             if ($@) {
-                $self->_log(error => "IO loop failed", $@);
-            }
+                $self->_log(error => "Error setting up loop", $@);
+            };
         };
         POSIX::_exit(0);
     }
@@ -53,10 +58,11 @@ sub run {
 sub _close_fds_but {
     my ($self, @keep_fhs) = @_;
     my @keep_fds = map fileno($_), @keep_fhs;
+
     $self->_log(debug => "Keeping fds: @keep_fds");
     my $max_fd = POSIX::sysconf(POSIX::_SC_OPEN_MAX) || 1024;
     for my $fd (3 .. $max_fd) {
-        POSIX::close($_)
+        POSIX::close($fd)
             unless grep { $fd == $_ } @keep_fds;
     }
 }
