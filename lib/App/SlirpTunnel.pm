@@ -11,7 +11,6 @@ use Data::Validate::Domain qw(is_hostname);
 use Data::Validate::IP qw(is_ipv4);
 use Path::Tiny;
 use File::XDG;
-use Path::Tiny;
 use POSIX;
 use Net::OpenSSH;
 

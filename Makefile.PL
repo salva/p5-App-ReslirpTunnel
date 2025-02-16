@@ -1,14 +1,17 @@
 use 5.038002;
 use ExtUtils::MakeMaker;
-# See lib/ExtUtils/MakeMaker.pm for details of how to influence
-# the contents of the Makefile that is written.
-WriteMakefile(
-    NAME              => 'App::SlirpTunnel',
-    VERSION_FROM      => 'lib/App/SlirpTunnel.pm', # finds $VERSION, requires EU::MM from perl >= 5.5
-    PREREQ_PM         => {}, # e.g., Module::Name => 1.1
-    ABSTRACT_FROM     => 'lib/App/SlirpTunnel.pm', # retrieve abstract from module
-    AUTHOR            => 'Salvador Fandiño <salva@>',
-    #LICENSE           => 'perl',
-    #Value must be from legacy list of licenses here
-    #https://metacpan.org/pod/Module::Build::API
+
+WriteMakefile( NAME => 'App::SlirpTunnel',
+               VERSION_FROM => 'lib/App/SlirpTunnel.pm',
+               PREREQ_PM => { 'File::XDG' => '1.03',
+                              'Log::Any' => '1.717',
+                              'Net::OpenSSH' => '0.84',
+                              'Path::Tiny' => '0.146',
+                              'Data::Validate::Domain' => '0.15',
+                              'Data::Validate::IP' => '0.31',
+                            },
+               ABSTRACT_FROM => 'lib/App/SlirpTunnel.pm',
+               AUTHOR => 'Salvador Fandiño <sfandino@yahoo.com>',
+               LICENSE => 'perl',
+               EXE_FILES => ['bin/slirp-tunnel'],
 );
