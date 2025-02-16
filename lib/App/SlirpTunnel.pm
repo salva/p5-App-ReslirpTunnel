@@ -556,45 +556,35 @@ sub _kill_everything {
 
 1;
 __END__
-# Below is stub documentation for your module. You'd better edit it!
 
 =head1 NAME
 
-App::SlirpTunnel - Perl extension for blah blah blah
-
-=head1 SYNOPSIS
-
-  use App::SlirpTunnel;
-  blah blah blah
+App::SlirpTunnel - A wrapper for the slirp-tunnel application
 
 =head1 DESCRIPTION
 
-Stub documentation for App::SlirpTunnel, created by h2xs. It looks like the
-author of the extension was negligent enough to leave the stub
-unedited.
+App::SlirpTunnel provides the `slirp-tunnel` application, which allows
+one to establish a network tunnel through an SSH connection,
+terminated in SLIRP.
 
-Blah blah blah.
+This application handles all necessary initialization, configuration, and
+the underlying communication processes required to maintain the tunnel.
 
-=head2 EXPORT
+The module is not intended for direct use, as it serves solely as a wrapper
+for the underlying slirp-tunnel application functionality.
 
-None by default.
+=head1 BUGS AND SUPPORT
 
-
+To report bugs or request features, please visit the GitHub repository
+at L<https://github.com/salva/p5-App-SlirpTunnel>.
 
 =head1 SEE ALSO
 
-Mention other useful documentation such as the documentation of
-related modules or operating system documentation (such as man pages
-in UNIX), or any relevant external documentation such as RFCs or
-standards.
-
-If you have a mailing list set up for your module, mention it here.
-
-If you have a web site set up for your module, mention it here.
+L<slirp-tunnel>.
 
 =head1 AUTHOR
 
-Salvador Fandiño, E<lt>salva@E<gt>
+Salvador Fandiño, E<lt>sfandino@yahoo.comE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
@@ -603,6 +593,5 @@ Copyright (C) 2025 by Salvador Fandiño
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.38.2 or,
 at your option, any later version of Perl 5 you may have available.
-
 
 =cut
