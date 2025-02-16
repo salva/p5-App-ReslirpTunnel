@@ -121,3 +121,124 @@ my $tunnel = App::SlirpTunnel->new(app_name => 'slirp-tunnel',
 
 $tunnel->go;
 
+=pod
+
+=head1 NAME
+
+slirp-tunnel - A script to set up a SLIRP tunnel over SSH for remote connections
+
+=head1 SYNOPSIS
+
+slirp-tunnel [options] [remote_host]
+
+=head1 DESCRIPTION
+
+slirp-tunnel sets up a SLIRP tunnel to a specified remote host using
+SSH. It allows users to configure various networking options such as
+remote network settings, logging preferences, and more.
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<-C, --slirp-cmd, --slirp-command> I<command>
+
+Specify the slirp command to be used.
+
+Defaults to `C:\Program Files\reSLIRP\reslirp.ext`.
+
+=item B<-s, --ssh-cmd, --ssh-command> I<command>
+
+Specify the SSH command to be used.
+
+=item B<-R, --remote-os> I<os>
+
+Specify the remote operating system (autodetected by default).
+
+=item B<-S, --remote-shell> I<shell>
+
+Specify the remote shell (autodetected by default).
+
+=item B<-n, --remote-network> I<network>
+
+Specify the remote network (defaults to 10.0.2.0/24).
+
+=item B<-m, --remote-netmask> I<netmask>
+
+Specify the remote netmask (defaults to 255.255.255.0).
+
+=item B<-g, --remote-gw> I<gateway>
+
+Specify the remote gateway (defaults to 10.0.2.2).
+
+=item B<-d, --remote-dns> I<dns>
+
+Specify the remote DNS (defaults to 10.0.2.3).
+
+=item B<-a, --local-ip> I<ip>
+
+Specify the local IP (defaults to 10.0.2.30).
+
+=item B<-i, --tap-device> I<device>
+
+Specify the tap device (autodetected by default).
+
+=item B<-s, --ssh-arg> I<arg>
+
+Specify additional SSH arguments.
+
+=item B<-r, --slirp-arg> I<arg>
+
+Specify additional slirp arguments.
+
+=item B<-E, --log-to-stderr>
+
+Log to standard error.
+
+=item B<-L, --log-file> I<file>
+
+Specify the log file (by default logs to a file in ~/.local/state/slirp-tunnel/logs).
+
+=item B<-D, --log-level> I<level>
+
+Specify the log level (debug, info, warn, error).
+
+=item B<-l, --remote-user> I<user>
+
+Specify the remote user.
+
+=item B<-p, --remote-port> I<port>
+
+Specify the remote port (defaults to 22).
+
+=item B<-h, --route-host, --route-host-local> I<host>
+
+Add a route for host (resolved locally).
+
+=item B<-H, --route-host-dns> I<host>
+
+Add a route for host (resolved using remote DNS).
+
+=item B<-W, --route-host-ssh> I<host>
+
+Add a route for host (resolved using a remote command run through SSH).
+
+=item B<-f, --run-in-foreground>
+
+Run in foreground.
+
+=item B<--dont-close-stdio>
+
+Don't close stdio.
+
+=back
+
+=head1 EXAMPLES
+
+  slirp-tunnel -C slirp -s ssh -R linux -n 10.0.2.0/24
+
+=head1 AUTHOR
+
+This script was written by the authors of App::SlirpTunnel.
+
+=cut
