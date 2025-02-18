@@ -1,4 +1,4 @@
-package App::SlirpTunnel::RPC;
+package App::ReslirpTunnel::RPC;
 
 use Socket::MsgHdr;
 use IO::Socket::UNIX;

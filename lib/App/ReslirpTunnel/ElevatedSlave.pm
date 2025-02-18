@@ -1,4 +1,4 @@
-package App::SlirpTunnel::ElevatedSlave;
+package App::ReslirpTunnel::ElevatedSlave;
 
 use strict;
 use warnings;
@@ -8,9 +8,9 @@ use Fcntl qw(:mode);
 use Socket;
 use Socket::MsgHdr;
 use IO::Socket::UNIX;
-use App::SlirpTunnel::RPC;
+use App::ReslirpTunnel::RPC;
 
-use parent 'App::SlirpTunnel::Logger';
+use parent 'App::ReslirpTunnel::Logger';
 
 use constant TUNSETIFF => 0x400454ca;  # Define constant for TUNSETIFF
 use constant IFF_TAP   => 0x0002;
@@ -174,9 +174,9 @@ sub new {
                         log_to_stderr => $args{log_to_stderr},
                         log_file => $args{log_file},
                         log_uid => $args{log_uid},
-                        log_prefix => "SlirpTunnel::ElevatedSlave");
+                        log_prefix => "ReslirpTunnel::ElevatedSlave");
 
-    $self->{rpc} = App::SlirpTunnel::RPC->new($args{socket});
+    $self->{rpc} = App::ReslirpTunnel::RPC->new($args{socket});
     $self->_log(info => "Evalated slave started");
     $self
 }

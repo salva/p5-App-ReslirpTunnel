@@ -1,4 +1,4 @@
-package App::SlirpTunnel;
+package App::ReslirpTunnel;
 
 our $VERSION = '0.01';
 
@@ -14,10 +14,10 @@ use File::XDG;
 use POSIX;
 use Net::OpenSSH;
 
-use parent 'App::SlirpTunnel::Logger';
+use parent 'App::ReslirpTunnel::Logger';
 
-use App::SlirpTunnel::Butler;
-use App::SlirpTunnel::Loop;
+use App::ReslirpTunnel::Butler;
+use App::ReslirpTunnel::Loop;
 
 sub new {
     my ($class, %args) = @_;
@@ -33,14 +33,14 @@ sub go {
         $self->_init_xdg;
         $self->_init_time;
         $self->_init_logger;
-        $self->_log(info => "Starting SlirpTunnel");
+        $self->_log(info => "Starting ReslirpTunnel");
         $self->_set_signal_handlers;
         $self->_init_config;
         $self->_init_butler;
         $self->_init_ssh;
         $self->_send_to_background;
         $self->_init_tap_device;
-        $self->_init_slirp;
+        $self->_init_reslirp;
         $self->_init_loop;
         $self->_config_forward_dns;
         $self->_config_net_mappings;
@@ -48,7 +48,7 @@ sub go {
         $self->_init_resolver_rules;
         $self->_init_routes;
         $self->_wait_for_something;
-        $self->_log(info => "Terminating SlirpTunnel");
+        $self->_log(info => "Terminating ReslirpTunnel");
     };
     if ($@) {
         die "Something went wrong: $@\n";
@@ -74,9 +74,9 @@ sub _init_logger {
     my $fn = $self->{args}{log_file};
     unless (defined $fn) {
         my $parent_dir = $self->{xdg}->state_home->child('logs')->mkdir;
-        $fn = $parent_dir->child($self->{timestamp}.".slirp-tunnel.log");
+        $fn = $parent_dir->child($self->{timestamp}.".reslirp-tunnel.log");
         eval {
-            my $sl = $parent_dir->child('latest.slirp-tunnel.log');
+            my $sl = $parent_dir->child('latest.reslirp-tunnel.log');
             unlink $sl if -e $sl;
             symlink $fn, $sl;
         };
@@ -149,7 +149,7 @@ sub __ip_to_int {
 
 sub _init_butler {
     my $self = shift;
-    my $butler = $self->{butler} = App::SlirpTunnel::Butler->new(dont_close_stdio => $self->{dont_close_stdio},
+    my $butler = $self->{butler} = App::ReslirpTunnel::Butler->new(dont_close_stdio => $self->{dont_close_stdio},
                                                                  log_level => $self->{log_level},
                                                                  log_to_stderr => $self->{log_to_stderr},
                                                                  log_file => $self->{log_file});
@@ -178,7 +178,7 @@ sub _send_to_background {
             open STDERR, '>', '/dev/null' unless $self->{log_to_stderr};
         }
 
-        $self->{log_prefix} = "SlirpTunnel::Child";
+        $self->{log_prefix} = "ReslirpTunnel::Child";
 
         return 1; # Return in the child!!!
     }
@@ -269,11 +269,11 @@ sub _init_tap_device {
     1;
 }
 
-sub _init_slirp {
+sub _init_reslirp {
     my $self = shift;
     my $ssh = $self->{ssh};
-    my $cmd = $self->{slirp_command} = $self->{args}{slirp_command} // $self->_autodetect_slirp_command;
-    my @args = @{$self->{args}{more_slirp_args}};
+    my $cmd = $self->{slirp_command} = $self->{args}{slirp_command} // $self->_autodetect_reslirp_command;
+    my @args = @{$self->{args}{more_reslirp_args}};
     $self->_log(info => "Starting remote SLIRP process");
     $self->_log(debug => "Remote command: $cmd @args");
     my ($socket, undef, $stderr, $pid) = $ssh->open_ex({stderr_pipe => 1,
@@ -286,7 +286,7 @@ sub _init_slirp {
     $self->_log(info => "SLIRP process started");
 }
 
-sub _autodetect_slirp_command {
+sub _autodetect_reslirp_command {
     my $self = shift;
     if ($self->{remote_os} eq 'windows') {
         return 'C:\Program Files\reSLIRP\reslirp.exe';
@@ -614,7 +614,7 @@ sub _get_group_name {
 sub _init_loop {
     my $self = shift;
 
-    my $loop = App::SlirpTunnel::Loop->new(log_level => $self->{log_level},
+    my $loop = App::ReslirpTunnel::Loop->new(log_level => $self->{log_level},
                                            log_to_stderr => $self->{log_to_stderr},
                                            log_file => $self->{log_file});
 
@@ -701,36 +701,32 @@ __END__
 
 =head1 NAME
 
-App::SlirpTunnel - A wrapper for the slirp-tunnel application
+App::ReslirpTunnel - A wrapper for the reslirp-tunnel application
 
 =head1 DESCRIPTION
 
-App::SlirpTunnel provides the `slirp-tunnel` application, which allows
-one to establish a network tunnel through an SSH connection,
-terminated in SLIRP.
+C<App::ReslirpTunnel> provides the C<reslirp-tunnel> application,
+which allows one to establish a network tunnel through an SSH
+connection, terminated in L<reSLIRP|https://github.com/salva/reslirp>.
 
 This application handles all necessary initialization, configuration, and
 the underlying communication processes required to maintain the tunnel.
 
 The module is not intended for direct use, as it serves solely as a wrapper
-for the underlying slirp-tunnel application functionality.
+for the underlying reslirp-tunnel application functionality.
 
 =head1 BUGS AND SUPPORT
 
 To report bugs or request features, please visit the GitHub repository
-at L<https://github.com/salva/p5-App-SlirpTunnel>.
+at L<https://github.com/salva/p5-App-ReslirpTunnel>.
 
 =head1 SEE ALSO
 
-L<slirp-tunnel>.
-
-=head1 AUTHOR
-
-Salvador Fandiño, E<lt>sfandino@yahoo.comE<gt>
+L<reslirp-tunnel>.
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2025 by Salvador Fandiño
+Copyright (C) 2025 by Salvador FandiE<ntilde>o (sfandino@yahoo.com).
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.38.2 or,

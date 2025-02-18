@@ -1,4 +1,4 @@
-package App::SlirpTunnel::Butler;
+package App::ReslirpTunnel::Butler;
 
 use strict;
 use warnings;
@@ -7,16 +7,16 @@ use POSIX;
 use Socket;
 use IO::Socket::UNIX;
 use Path::Tiny;
-use App::SlirpTunnel::RPC;
+use App::ReslirpTunnel::RPC;
 
-use parent 'App::SlirpTunnel::Logger';
+use parent 'App::ReslirpTunnel::Logger';
 use Carp;
 
 sub new {
     my ($class, %args) = @_;
     my $self = { dont_close_stdio => delete $args{dont_close_stdio} };
     bless $self, $class;
-    $self->_init_logger(%args, log_prefix => "SlirpTunnel::Butler");
+    $self->_init_logger(%args, log_prefix => "ReslirpTunnel::Butler");
     return $self;
 }
 
@@ -26,7 +26,7 @@ sub start {
 
 sub _my_lib_path {
     my $self = shift;
-    my $lib_path = Path::Tiny->new($INC{'App/SlirpTunnel.pm'})->realpath->parent->parent;
+    my $lib_path = Path::Tiny->new($INC{'App/ReslirpTunnel.pm'})->realpath->parent->parent;
     $self->_log(debug => 'lib_path', $lib_path);
     return $lib_path;
 }
@@ -51,7 +51,7 @@ sub _start_slave {
         POSIX::dup2(fileno($child_socket), 1)
             or $self->_die("dup2 failed", $!);
         my $lib_path = $self->_my_lib_path;
-        my @sudo_cmd = ("sudo", $^X, "-I".$lib_path, "-MApp::SlirpTunnel::ElevatedSlave", "-e", "App::SlirpTunnel::ElevatedSlave::start");
+        my @sudo_cmd = ("sudo", $^X, "-I".$lib_path, "-MApp::ReslirpTunnel::ElevatedSlave", "-e", "App::ReslirpTunnel::ElevatedSlave::start");
         push @sudo_cmd, $self->_arg2hex($self->{dont_close_stdio});
         push @sudo_cmd, $self->_arg2hex($self->{log_level});
         push @sudo_cmd, $self->_arg2hex($self->{log_to_stderr});
@@ -83,7 +83,7 @@ sub _start_slave {
         }
         else {
             $self->_log(debug => "sudo exited with code 0");
-            $self->{rpc} = App::SlirpTunnel::RPC->new($parent_socket);
+            $self->{rpc} = App::ReslirpTunnel::RPC->new($parent_socket);
             return 1;
         }
     }

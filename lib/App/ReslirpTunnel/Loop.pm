@@ -1,16 +1,16 @@
-package App::SlirpTunnel::Loop;
+package App::ReslirpTunnel::Loop;
 
 use strict;
 use warnings;
 use POSIX;
 
-use parent 'App::SlirpTunnel::Logger';
+use parent 'App::ReslirpTunnel::Logger';
 
 sub new {
     my ($class, %logger_args) = @_;
     my $self = bless {}, $class;
     $self->_init_logger(%logger_args,
-                       log_prefix => 'SlirpTunnel::Loop');
+                       log_prefix => 'ReslirpTunnel::Loop');
     return $self;
 }
 

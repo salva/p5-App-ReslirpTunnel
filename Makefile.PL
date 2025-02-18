@@ -1,8 +1,8 @@
 use 5.038002;
 use ExtUtils::MakeMaker;
 
-WriteMakefile( NAME => 'App::SlirpTunnel',
-               VERSION_FROM => 'lib/App/SlirpTunnel.pm',
+WriteMakefile( NAME => 'App::ReslirpTunnel',
+               VERSION_FROM => 'lib/App/ReslirpTunnel.pm',
                PREREQ_PM => { 'File::XDG' => '1.03',
                               'Log::Any' => '1.717',
                               'Net::OpenSSH' => '0.84',
@@ -10,8 +10,8 @@ WriteMakefile( NAME => 'App::SlirpTunnel',
                               'Data::Validate::Domain' => '0.15',
                               'Data::Validate::IP' => '0.31',
                             },
-               ABSTRACT_FROM => 'lib/App/SlirpTunnel.pm',
+               ABSTRACT_FROM => 'lib/App/ReslirpTunnel.pm',
                AUTHOR => 'Salvador Fandiño <sfandino@yahoo.com>',
                LICENSE => 'perl',
-               EXE_FILES => ['bin/slirp-tunnel'],
+               EXE_FILES => ['bin/reslirp-tunnel'],
 );

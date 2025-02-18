@@ -1,4 +1,4 @@
-package App::SlirpTunnel::Logger;
+package App::ReslirpTunnel::Logger;
 
 use strict;
 use warnings;
@@ -25,7 +25,7 @@ sub _init_logger {
             }
             # warn "Sending log to $fn\n";
         }
-        $self->{log_prefix} = $args{log_prefix} // 'SlirpTunnel';
+        $self->{log_prefix} = $args{log_prefix} // 'ReslirpTunnel';
     };
     if ($@) {
         warn "Can't initialize logger for $self, (uid: $<, euid: $>): $@\n";
@@ -37,7 +37,7 @@ sub _init_logger {
 sub _log {
     my ($self, $level, @msg) = @_;
     local ($?, $@, $!);
-    my $prefix = $self->{log_prefix} // 'SlirpTunnel';
+    my $prefix = $self->{log_prefix} // 'ReslirpTunnel';
     my $msg = "$prefix> ".join(': ', grep defined, @msg);
     eval {
         $self->{log}->$level($msg);
