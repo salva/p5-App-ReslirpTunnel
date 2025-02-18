@@ -314,9 +314,9 @@ Don't close stdio.
 
 =back
 
-=HEAD1 EXAMPLES
+=head1 EXAMPLES
 
-  reslirp-tunnel -C reslirp -s ssh -R linux -n 10.0.2.0/24
+  reslirp-tunnel --route-net=10.0.0.0/8 --forward-dns-ssh=windows.net localhost:4022
 
 =head1 AUTHOR
 
