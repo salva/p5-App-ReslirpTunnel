@@ -59,15 +59,17 @@ sub _device_addr_add__rpc {
 
 sub _start_dnsmasq__rpc {
     my ($self, $request) = @_;
-    my $listen_address = $request->{listen_address};
     my $mapping = $request->{mapping};
     my $user = $request->{user} // 'nobody';
     my $group = $request->{group} // 'nogroup';
+    my $pid_fn = $request->{pid_fn} // '';
+    my $log_fn = $request->{log_fn};
 
     my @args = ('dnsmasq',
+                '--pid-file='.$pid_fn,
+                '--log-facility='.$log_fn,
                 '--user='.$user,
                 '--group='.$group,
-                '--listen-address='.$listen_address,
                 '--no-hosts',
                 '--no-resolv',
                 '--bind-interfaces',
@@ -75,9 +77,23 @@ sub _start_dnsmasq__rpc {
                 '--log-queries',
                 '--server=',
                 '--no-dhcp-interface=*');
-    push @args, "--address=/$_/$mapping->{$_}" for keys %$mapping;
-    #push @args, "--host-record=$_,$mapping->{$_}" for keys %$mapping;
-    $self->_do_system(@args);
+    for my $domain (keys %$mapping) {
+        push @args, "--address=/$domain/$_" for @{$mapping->{$domain}};
+    }
+    my $r = $self->_do_system(@args);
+
+    # Wait for the pid file to appear
+    for (1..100) {
+        if (open my $fh, '<', $pid_fn) {
+            my $line = <$fh>;
+            if ($line =~ /^(\d+)\n/) {
+                return { %$r, pid => $1 }
+            }
+        }
+        select (undef, undef, undef, 0.1);
+    }
+
+    $self->_die("Failed to start dnsmasq, cannot read PID file at $pid_fn");
 }
 
 sub _resolvectl_domain__rpc {
@@ -97,9 +113,9 @@ sub _resolvectl_dns__rpc {
 sub _route_add__rpc {
     my ($self, $request) = @_;
     my $tap_device = $request->{device};
-    my $ip = $request->{ip};
+    my $net = $request->{net};
     my $gw = $request->{gw};
-    $self->_do_system("ip", "route", "add", $ip, "via", $gw, "dev", $tap_device);
+    $self->_do_system("ip", "route", "add", $net, "via", $gw, "dev", $tap_device);
 }
 
 sub _bye__rpc {

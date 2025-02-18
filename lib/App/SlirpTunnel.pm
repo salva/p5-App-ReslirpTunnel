@@ -33,7 +33,7 @@ sub go {
 
     eval {
         $self->_init_xdg;
-
+        $self->_init_time;
         $self->_init_logger;
         $self->_log(info => "Starting SlirpTunnel");
         $self->_set_signal_handlers;
@@ -63,15 +63,25 @@ sub _init_xdg {
     $self->{xdg} = File::XDG->new(name => $app_name, path_class => 'Path::Tiny');
 }
 
+sub _init_time {
+    my $self = shift;
+    $self->{timestamp} = POSIX::strftime("%Y%m%dT%H%M%SZ", gmtime);
+}
+
 sub _init_logger {
     my $self = shift;
     my $level = $self->{args}{log_level};
     my $log_to_stderr = $self->{args}{log_to_stderr};
-    my $fn = $self->{args}{log_file} //
-        $self->{xdg}
-        ->state_home
-        ->child('logs')
-        ->child(POSIX::strftime("%Y%m%dT%H%M%SZ.slirp-tunnel.log", gmtime));
+    my $fn = $self->{args}{log_file};
+    unless (defined $fn) {
+        my $parent_dir = $self->{xdg}->state_home->child('logs')->mkdir;
+        $fn = $parent_dir->child($self->{timestamp}.".slirp-tunnel.log");
+        eval {
+            my $sl = $parent_dir->child('latest.slirp-tunnel.log');
+            unlink $sl if -e $sl;
+            symlink $fn, $sl;
+        };
+    }
     $self->SUPER::_init_logger(log_level => $level, log_to_stderr => $log_to_stderr, log_file => $fn);
 }
 
@@ -236,7 +246,7 @@ sub _autodetect_remote_os {
 sub _autodetect_remote_shell {
     my $self = shift;
     if ($self->{remote_os} eq 'windows') {
-        return $self->{remote_shell} = 'MSWin';
+        return $self->{remote_shell} = 'windows';
     }
     my $ssh = $self->{ssh};
     my $out = $ssh->capture('echo $SHELL') or return "sh";
@@ -300,9 +310,40 @@ sub _config_net_mappings {
     $self->{net_mapping} = {};
     $self->{forward} = {};
 
+    $self->_config_net_mappings_direct;
     $self->_config_net_mappings_local;
     $self->_config_net_mappings_dns;
     $self->_config_net_mappings_ssh;
+}
+
+sub _config_net_mappings_net {
+    my $self = shift;
+    for my $record (@{$self->{args}{route_nets}}) {
+        my $addr = $record->{addr};
+        my $mask = $record->{mask};
+        if ($self->_validate_ip($addr) and $self->_validate_netmask($mask)) {
+            $self->{forward}{"$addr/$mask"} = 1;
+        }
+        else {
+            $self->_log(warn => "Ignoring invalid network", "$addr/$mask");
+        }
+    }
+}
+
+sub _config_net_mappings_direct {
+    my $self = shift;
+    for my $record (@{$self->{args}{route_hosts}}) {
+        my $addrs = $record->{addrs} // [];
+        $self->{forward}{"$_/32"} = 1 for @$addrs;
+        if (defined (my $host = $record->{host})) {
+            if ($self->_validate_domain_name($host)) {
+                push @{$self->{net_mapping}{$host} //= []}, @$addrs;
+            }
+            else {
+                $self->_log(warn => "Ignoring host with invalid name", $host);
+            }
+        }
+    }
 }
 
 sub _config_net_mappings_local {
@@ -310,17 +351,20 @@ sub _config_net_mappings_local {
     for my $host (@{$self->{args}{route_hosts_local}}) {
         my $addr;
         if (is_ipv4($host)) {
-            $self->{forward}{$host} = 1;
+            $self->{forward}{"$host/32"} = 1;
         }
         elsif ($self->_validate_domain_name($host)) {
             my $good;
-            for my $record (Socket::getaddrinfo($host)) {
-                if ($record->{family} == AF_INET) {
-                    my (undef, $packed_ip) = sockaddr_in($record->{addr});
-                    my $addr = inet_ntoa($packed_ip);
-                    push @{$self->{net_mapping}{$host} //= []}, $addr;
-                    $self->{forward}{$addr} = 1;
-                    $good = 1;
+            my ($err, @records) = Socket::getaddrinfo($host);
+            unless ($err) {
+                for my $record (@records) {
+                    if ($record->{family} == AF_INET) {
+                        my (undef, $packed_ip) = sockaddr_in($record->{addr});
+                        my $addr = inet_ntoa($packed_ip);
+                        push @{$self->{net_mapping}{$host} //= []}, $addr;
+                        $self->{forward}{"$addr/32"} = 1;
+                        $good = 1;
+                    }
                 }
             }
             $good or $self->_log(warn => "Failed to resolve host, ignoring it", $host);
@@ -333,7 +377,7 @@ sub _config_net_mappings_local {
 
 sub _validate_domain_name {
     my ($self, $domain) = @_;
-    is_hostname($domain, 'domain_private_tld' => 1) and return 1;
+    is_hostname($domain, {'domain_private_tld' => 1}) and return 1;
     $self->_log(debug => "Bad domain", $domain);
     return undef;
 }
@@ -353,7 +397,7 @@ sub _config_net_mappings_dns {
                         if ($rr->type eq 'A') {
                             my $addr = $rr->address;
                             push @{$self->{net_mapping}{$host} //= []}, $addr;
-                            $self->{forward}{$addr} = 1;
+                            $self->{forward}{"$addr/32"} = 1;
                             $good = 1;
                         }
                     }
@@ -373,11 +417,11 @@ sub _config_net_mappings_ssh {
     for my $host (@$route_hosts) {
         if ($self->_validate_domain_name($host)) {
             $self->_log(debug => "Resolving $host using remote shell");
-            my $method = "_resolve_remote_host_with_shell__" + (($self->{remote_os} eq 'windows') ? 'windows' : 'unix');
+            my $method = "_resolve_remote_host_with_shell__" . (($self->{remote_os} eq 'windows') ? 'windows' : 'unix');
             my @addrs = $self->$method($host);
             for my $addr (@addrs) {
                 push @{$self->{net_mapping}{$host} //= []}, $addr;
-                $self->{forward}{$addr} = 1;
+                $self->{forward}{"$addr/32"} = 1;
             }
             @addrs or $self->_log(warn => "Failed to resolve host using remote DNS, ignoring it", $host);
         }
@@ -397,18 +441,24 @@ sub _resolve_remote_host_with_shell__windows {
     my ($self, $host) = @_;
     my $ssh = $self->{ssh};
 
-    my $out = $ssh->capture('powershell', '-Command', "Resolve-DnsName $host | ConvertTo-Json");
+    my $out = $ssh->capture({remote_shell=> 'MSWin'}, 'powershell', '-Command', "Resolve-DnsName $host | ConvertTo-Json");
+    my @addrs;
     eval {
-        my @addrs;
         my $records = decode_json($out);
+        my @names = $host;
+        for my $r (@$records) {
+            push @names, $r->{NameHost} if $r->{Type} == 5;
+        }
         for my $r (@$records) {
             push @addrs, $r->{IP4Address} if $r->{Type} == 1
         }
         return @addrs
     };
-    $self->_log(warn => "Failed to parse JSON output from Resolve-DnsName");
-    $self->_log(debug => "Output was", $out);
-    ()
+    unless (@addrs) {
+        $self->_log(warn => "Failed to parse JSON output from Resolve-DnsName", $@);
+        $self->_log(debug => "Output was", $out);
+    }
+    return @addrs;
 }
 
 sub _init_dnsmasq {
@@ -417,14 +467,27 @@ sub _init_dnsmasq {
 
     if (%$net_mapping) {
         $self->_log(info => "Starting dnsmasq");
+
+        my $pid_parent_dir = $self->{xdg}->state_home->child('dnsmasq')->mkdir;
+        my $pid_fn = $pid_parent_dir->child($self->{timestamp}.".dnsmasq.pid");
+        my $latest_fn = $pid_parent_dir->child("latest.dnsmasq.pid");
+        unlink $latest_fn if -e $latest_fn;
+        symlink $pid_fn, $latest_fn;
+        my $log_fn = $self->{xdg}->state_home->child('logs')->mkdir->child($self->{timestamp}.".dnsmasq.log");
         my $butler = $self->{butler};
         my $user_name = $self->_get_user_name;
         my $group_name = $self->_get_group_name;
-        my $pid = $butler->start_dnsmasq(device => $self->{device},
+        my $pid = $butler->start_dnsmasq(device => $self->{tap_device},
                                          mapping => $net_mapping,
                                          user => $user_name,
-                                         group => $group_name );
+                                         group => $group_name,
+                                         pid_fn => "$pid_fn",
+                                         log_fn => "$log_fn");
         $self->{dnsmasq_pid} = $pid;
+        $self->_log(debug => "dnsmasq PID", $pid);
+    }
+    else {
+        $self->_log(debug => 'dnsmasq not required');
     }
 }
 
@@ -434,7 +497,7 @@ sub _init_resolver_rules {
     if(%$net_mapping) {
         $self->_log(info => "Setting up resolver rules");
         my $butler = $self->{butler};
-        my $device = $self->{device};
+        my $device = $self->{tap_device};
         my $local_ip = $self->{local_ip};
         $butler->resolvectl_dns(device => $device, dns => $local_ip);
         for my $host (keys %$net_mapping) {
@@ -449,8 +512,8 @@ sub _init_routes {
     if (%$forward) {
         $self->_log(info => "Setting up routes");
         my $butler = $self->{butler};
-        for my $addr (keys %$forward) {
-            $butler->route_add(ip => $addr, gw => $self->{remote_gw}, device => $self->{device});
+        for my $net (keys %$forward) {
+            $butler->route_add(net => $net, gw => $self->{remote_gw}, device => $self->{tap_device});
         }
     }
 }
@@ -538,16 +601,21 @@ sub _kill_everything {
     for my $process (qw(loop slirp dnsmasq)) {
         my $pid = $self->{"${process}_pid"} // next;
         $self->_log(debug => "Waiting for process $process (PID: $pid) to finish");
-        next unless kill(0 => $pid);
-        for my $signal (@signals) {
-            my $kid = waitpid($pid, WNOHANG);
-            if ($kid == $pid) {
-                $self->_log(debug => "Process $process exited and captured", $?);
-                last;
+        if (kill(0 => $pid) > 0) {
+            for my $signal (@signals) {
+                my $kid = waitpid($pid, WNOHANG);
+                if ($kid == $pid) {
+                    $self->_log(debug => "Process $process exited and captured", $?);
+                    last;
+                }
+                sleep 1;
+                $self->_log(debug => "Sending signal $signal to process $pid");
+                kill $signal => $pid;
             }
-            sleep 1;
-            $self->_log(debug => "Sending signal $signal to process $pid");
-            kill $signal => $pid;
+        }
+        else {
+            $self->_log(debug => "Cannot send signals to process $pid");
+            last;
         }
     }
     $self->_log(info => "All processes finished");

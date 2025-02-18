@@ -32,8 +32,8 @@ sub run {
                 push @keep_fhs, $log_fh if defined $log_fh;
 
                 $self->_close_fds_but(@keep_fhs);
+                $self->_init_signal_handlers();
                 eval {
-                    $SIG{INT} = 'IGNORE';
                     $self->_log(debug => 'looping...');
                     $self->_loop($tap_handle, $ssh_handle, $ssh_err_handle);
                 };
@@ -53,6 +53,15 @@ sub run {
     }
     $self->{pid} = $pid;
     return $pid;
+}
+
+sub _init_signal_handlers {
+    my $self = shift;
+    my $signal_count = 0;
+    $self->{signal_handler} //= sub { $signal_count++ };
+    $self->{signal_count_ref} //= \$signal_count;
+    $SIG{INT} = $self->{signal_handler};
+    $SIG{TERM} = $self->{signal_handler};
 }
 
 sub _close_fds_but {
@@ -85,7 +94,7 @@ sub _loop {
     my $close_later;
     my $err_close_time_limit;
 
-    while ($err_open) {
+    while ($err_open and not ${$self->{signal_count_ref}}) {
         my $ssh2tap_pkt_len;
         my $rfds = '';
         my $wfds = '';
