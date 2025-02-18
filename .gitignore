@@ -1,0 +1,8 @@
+README.md~
+*.tar.gz
+MYMETA.json
+MYMETA.yml
+Makefile
+*~
+pm_to_blib
+blib/
