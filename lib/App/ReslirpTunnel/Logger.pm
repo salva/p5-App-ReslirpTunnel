@@ -17,7 +17,7 @@ sub _init_logger {
         }
         else {
             $self->{log_to_stderr} = 0;
-            my $fn = $self->{log_file} = $args{log_file} // "/tmp/slirp-tunnel.log";
+            my $fn = $self->{log_file} = $args{log_file} // "/tmp/reslirp-tunnel.log";
             Path::Tiny->new($fn)->parent->mkdir;
             $self->{log} = Log::Any->get_logger(default_adapter => ['File', "$fn", log_level => $level]);
             if (defined $args{log_uid}) {

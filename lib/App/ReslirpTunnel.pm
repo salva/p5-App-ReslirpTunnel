@@ -272,18 +272,18 @@ sub _init_tap_device {
 sub _init_reslirp {
     my $self = shift;
     my $ssh = $self->{ssh};
-    my $cmd = $self->{slirp_command} = $self->{args}{slirp_command} // $self->_autodetect_reslirp_command;
+    my $cmd = $self->{reslirp_command} = $self->{args}{reslirp_command} // $self->_autodetect_reslirp_command;
     my @args = @{$self->{args}{more_reslirp_args}};
-    $self->_log(info => "Starting remote SLIRP process");
+    $self->_log(info => "Starting remote reSLIRP process");
     $self->_log(debug => "Remote command: $cmd @args");
     my ($socket, undef, $stderr, $pid) = $ssh->open_ex({stderr_pipe => 1,
                                                         stdinout_socket => 1},
                                                        $cmd, @args);
-    $self->{slirp_socket} = $socket;
-    $self->{slirp_stderr} = $stderr;
-    $self->{slirp_pid} = $pid;
-    $pid or $self->_die("Failed to start SLIRP process");
-    $self->_log(info => "SLIRP process started");
+    $self->{reslirp_socket} = $socket;
+    $self->{reslirp_stderr} = $stderr;
+    $self->{reslirp_pid} = $pid;
+    $pid or $self->_die("Failed to start reSLIRP process");
+    $self->_log(info => "reSLIRP process started");
 }
 
 sub _autodetect_reslirp_command {
@@ -618,7 +618,7 @@ sub _init_loop {
                                            log_to_stderr => $self->{log_to_stderr},
                                            log_file => $self->{log_file});
 
-    my $pid = $loop->run($self->{tap_fh}, $self->{slirp_socket}, $self->{slirp_stderr})
+    my $pid = $loop->run($self->{tap_fh}, $self->{reslirp_socket}, $self->{reslirp_stderr})
         //$self->_die("Failed to start IO loop process");
 
     $self->_log(info => "IO loop process started, PID: $pid");
@@ -627,7 +627,7 @@ sub _init_loop {
 
 sub _find_process_by_pid {
     my ($self, $pid) = @_;
-    for my $process (qw(slirp loop dnsmasq)) {
+    for my $process (qw(reslirp loop dnsmasq)) {
         my $process_pid = $self->{"${process}_pid"};
         if (defined $process_pid) {
             return $process if $self->{"${process}_pid"} == $pid;
@@ -648,7 +648,7 @@ sub _wait_for_something {
         }
         else {
             $self->_log(debug => "process $kid exited, rc", $? >> 8);
-            for my $proc (qw(slirp loop ssh_master)) {
+            for my $proc (qw(reslirp loop ssh_master)) {
                 my $proc_pid = $self->{"${proc}_pid"};
                 if (defined $proc_pid and $kid == $proc_pid) {
                     $self->_log(info => "Process $proc (PID: $kid) finished");
@@ -673,7 +673,7 @@ sub _kill_everything {
         delete $self->{ssh_master_pid};
     }
 
-    for my $process (qw(loop slirp dnsmasq)) {
+    for my $process (qw(loop reslirp dnsmasq)) {
         my $pid = $self->{"${process}_pid"} // next;
         $self->_log(debug => "Waiting for process $process (PID: $pid) to finish");
         if (kill(0 => $pid) > 0) {
