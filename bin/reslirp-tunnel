@@ -176,13 +176,20 @@ reslirp-tunnel - A script to set up a reSLIRP tunnel over SSH for remote connect
 =head1 SYNOPSIS
 
 reslirp-tunnel [options] [remote_host]
-
 =head1 DESCRIPTION
 
-C<reslirp-tunnel> sets up a reSLIRP tunnel to a specified remote host
-using SSH. It allows users to configure various networking options,
-and handles IP routing rules and DNS resolution configuration
-simplificating greatly the setup of a reSLIRP tunnel.
+C<reslirp-tunnel> establishes a reSLIRP tunnel to a specified remote
+host using SSH. It enables users to configure various networking
+options and manages IP routing rules along with DNS resolution
+configuration, greatly simplifying the setup process for a reSLIRP
+tunnel.
+
+The program is designed to be executed by a non-root user. It
+automatically invokes sudo in the background, which typically prompts
+the user for a password to perform privileged operations.
+
+Also, the program is intended to be run on Linux system using
+C<systemd>.
 
 =head1 OPTIONS
 
@@ -192,7 +199,7 @@ simplificating greatly the setup of a reSLIRP tunnel.
 
 Specify the reSLIRP command to be used.
 
-By default, it uses c<C:\Program Files\reSLIRP\reslirp.ext>.  When the
+By default, it uses C<C:\Program Files\reSLIRP\reslirp.ext>. When the
 remote Operating System is Windows and C<reslirp> otherwise.
 
 =item B<-s, --ssh-cmd, --ssh-command> I<command>
@@ -341,6 +348,56 @@ channels remain open.
 =head1 EXAMPLES
 
   reslirp-tunnel --route-net=10.0.0.0/8 --forward-dns-ssh=windows.net localhost:4022
+
+=head1 UNDER THE HOOD
+
+Those are the actions performed under the hood by C<reslirp-tunnel>:
+
+
+=over 8
+
+=item 1.
+
+Initiates a slave process using C<sudo> to carry out privileged operations.
+
+=item 2.
+
+Establishes an SSH connection to the designated remote host.
+
+=item 3.
+
+Forks itself into the background and closes its standard input and output channels.
+
+=item 4.
+
+Creates a C<tap> device.
+
+=item 5.
+
+Executes C<reSLIRP> on the remote machine, linking it to the C<tap> device through an SSH channel.
+
+=item 6.
+
+If necessary, retrieves information about the remote machine's network configuration by executing commands over the SSH channel.
+
+=item 7.
+
+If necessary, starts a local DNS server (C<dnsmasq>) linked to the C<tap> device, configuring it to serve the various hosts and domains specified on the command line.
+
+=item 8.
+
+Adds all required routes to direct IP traffic through the tunnel, in accordance with the provided command line parameters.
+
+=item 9.
+
+If something goes wrong, or the process receives a signal, it cleans
+up, waiting for the child processes to exit and terminates.
+
+Note that IP routes and DNS configurations are attached to the C<tap>
+device, so they are automatically removed when the device is deleted.
+
+=back
+
 
 =head1 COPYRIGHT AND LICENSE
 
