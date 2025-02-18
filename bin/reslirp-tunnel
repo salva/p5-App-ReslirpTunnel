@@ -179,9 +179,10 @@ reslirp-tunnel [options] [remote_host]
 
 =head1 DESCRIPTION
 
-reslirp-tunnel sets up a reSLIRP tunnel to a specified remote host using
-SSH. It allows users to configure various networking options such as
-remote network settings, logging preferences, and more.
+C<reslirp-tunnel> sets up a reSLIRP tunnel to a specified remote host
+using SSH. It allows users to configure various networking options,
+and handles IP routing rules and DNS resolution configuration
+simplificating greatly the setup of a reSLIRP tunnel.
 
 =head1 OPTIONS
 
@@ -189,7 +190,7 @@ remote network settings, logging preferences, and more.
 
 =item B<-C, --reslirp-cmd, --reslirp-command> I<command>
 
-Specify the reslirp command to be used.
+Specify the reSLIRP command to be used.
 
 By default, it uses c<C:\Program Files\reSLIRP\reslirp.ext>.  When the
 remote Operating System is Windows and C<reslirp> otherwise.
@@ -266,6 +267,18 @@ Specify the remote user used for logging in.
 
 Specify the remote port (defaults to 22).
 
+=item B<-F, --forward-dns-ssh> I<dns>=I<remote_iface>
+
+Resolves the given domain using the remote DNS server attached to the
+given interface in the remote machine.
+
+This is useful for resolving using the DNS provided by a VPN
+client running in the target machine.
+
+=item B<-N, --route-net, --route-network> I<ipv4>/<mask>
+
+Route the traffics to the given network through the reSLIRP tunnel.
+
 =item B<-h, --route-host, --route-host-local> I<host>
 
 =item B<-H, --route-host-dns> I<host>
@@ -281,22 +294,25 @@ hostnames:
 
 =over 8
 
-=item B<--route-host, --route-host-local> resolves the host locally
-using the OS resolver.
+=item B<--route-host, --route-host-local>
 
-=item B<--route-host-dns> resolves the host using the remote DNS
-provided by reSLIRP which forwards the request to any configured DNS
-server. Though, note that this doesn't usually work when the remote
-hosts runs Windows.
+Resolves the host locally using the OS resolver.
 
-=item B<--route-host-ssh> resolves the host using commands run on the
-remote machine through the SSH connection. Effectively, this approach
-resolves the names using the resolver configuration in the remote
-machine.
+=item B<--route-host-dns>
+
+Resolves the host using the remote DNS provided by reSLIRP which
+forwards the request to any configured DNS server. Though, note that
+this doesn't usually work when the remote hosts runs Windows.
+
+=item B<--route-host-ssh>
+
+Resolves the host using commands run on the remote machine through the
+SSH connection. Effectively, this approach resolves the names using
+the resolver configuration in the remote machine.
 
 =back
 
-The addreses are resolved at launch time and then cached in a local
+The addresses are resolved at launch time and then cached in a local
 DNS server set up by C<reslirp-tunnel>. The configuration of C<systemd>
 resolver is also adjusted so that the DNS service is used for those
 hosts.
@@ -304,13 +320,21 @@ hosts.
 Finally, a set of IP rules are also added for directing the traffic
 through the tunnel.
 
-=item B<-f, --run-in-foreground>
+=item B<-f>, B<--run-in-foreground>
 
-Run in foreground.
+By default, C<reslirp-tunnel> detaches from the terminal once the
+slave sudo process begins and the SSH connection is established. This
+option disables that behavior.
 
 =item B<--dont-close-stdio>
 
-Don't close stdio.
+Preserve standard input/output.
+
+By default, when C<reslirp-tunnel> forks itself into the background,
+it closes its standard input and output channels. This can complicate
+matters by preventing error messages from being printed
+afterward. Enabling this option ensures that the standard input/output
+channels remain open.
 
 =back
 
@@ -318,8 +342,12 @@ Don't close stdio.
 
   reslirp-tunnel --route-net=10.0.0.0/8 --forward-dns-ssh=windows.net localhost:4022
 
-=head1 AUTHOR
+=head1 COPYRIGHT AND LICENSE
 
-This script was written by the authors of App::ReslirpTunnel.
+Copyright (C) 2025 by Salvador FandiE<ntilde>o (sfandino@yahoo.com).
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself, either Perl version 5.38.2 or,
+at your option, any later version of Perl 5 you may have available.
 
 =cut
