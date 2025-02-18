@@ -1,16 +1,16 @@
-# App::SlirpTunnel
+# App::ReslirpTunnel
 
 ## Description
 
-App::SlirpTunnel is a wrapper for the `slirp-tunnel` application, which enables the establishment of a network tunnel through an SSH connection, ending in SLIRP.
+App::ReslirpTunnel is a wrapper for the `reslirp-tunnel` application, which enables the establishment of a network tunnel through an SSH connection, ending in reSLIRP.
 
 This application takes care of all necessary initialization, configuration, and the underlying communication processes needed to maintain the tunnel.
 
-Please note that this module is not designed for direct use; it solely acts as a wrapper for the underlying functionality of the slirp-tunnel application.
+Please note that this module is not designed for direct use; it solely acts as a wrapper for the underlying functionality of the reslirp-tunnel application.
 
 ## Installation
 
-To install App::SlirpTunnel, you can use either the standard Perl module installation method with MakeMaker or the CPAN client.
+To install App::ReslirpTunnel, you can use either the standard Perl module installation method with MakeMaker or the CPAN client.
 
 ### Using MakeMaker
 
@@ -30,12 +30,12 @@ Ensure you have the necessary permissions to install modules on your system.
 Alternatively, you can easily install the module using the CPAN command-line client with a single command:
 
 ```bash
-cpan App::SlirpTunnel
+cpan App::ReslirpTunnel
 ```
 
 ## Bugs and Support
 
-To report bugs or request features, please visit the GitHub repository at [https://github.com/salva/p5-App-SlirpTunnel](https://github.com/salva/p5-App-SlirpTunnel).
+To report bugs or request features, please visit the GitHub repository at [https://github.com/salva/p5-App-ReslirpTunnel](https://github.com/salva/p5-App-ReslirpTunnel).
 
 ## Copyright and License
 

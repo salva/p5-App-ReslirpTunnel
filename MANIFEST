@@ -1,6 +1,6 @@
 Changes
 Makefile.PL
 MANIFEST
-README
-t/App-SlirpTunnel.t
-lib/App/SlirpTunnel.pm
+README.md
+t/App-ReslirpTunnel.t
+lib/App/ReslirpTunnel.pm
