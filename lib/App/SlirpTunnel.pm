@@ -28,8 +28,6 @@ sub new {
 
 sub go {
     my $self = shift;
-    # use Data::Dumper;
-    # warn "args:\n".Dumper($self->{args});
 
     eval {
         $self->_init_xdg;
@@ -44,6 +42,7 @@ sub go {
         $self->_init_tap_device;
         $self->_init_slirp;
         $self->_init_loop;
+        $self->_config_forward_dns;
         $self->_config_net_mappings;
         $self->_init_dnsmasq;
         $self->_init_resolver_rules;
@@ -239,7 +238,7 @@ sub _autodetect_remote_os {
             return 'windows';
         }
     }
-    $self->_log(warn => "Unable to autodetect remote OS");
+    $self->_warn("Unable to autodetect remote OS");
     return;
 }
 
@@ -305,11 +304,66 @@ sub _find_unused_tap_device {
     $self->_die("Unable to find an unused tap device");
 }
 
+sub _config_forward_dns {
+    my $self = shift;
+    $self->{forward_dns} //= {};
+    $self->{forward_ipv4} //= {};
+    $self->_config_forward_dns_ssh;
+}
+
+sub _config_forward_dns_ssh {
+    my $self = shift;
+    for my $record (@{$self->{args}{forward_dns_ssh}}) {
+        $self->_log(debug => "Retrieving iface DNS servers using remote shell");
+        my $domain = $record->{domain};
+        my $iface = $record->{iface};
+        my $method = "_resolve_remote_iface_dns__". (($self->{remote_os} eq 'windows') ? 'windows' : 'unix');
+        if (my @addrs = $self->$method($iface)) {
+            $self->_log(debug => "DNS servers for remote iface $iface", join(", ", @addrs));
+            for my $addr (@addrs) {
+                push @{$self->{forward_dns}{$domain} //= []}, $addr;
+                $self->{forward_ipv4}{"$addr/32"} = 1;
+            }
+        }
+        else {
+            $self->_warn("Failed to retrieve DNS servers using remote shell, ignoring domain", $record->{domain});
+        }
+    }
+}
+
+sub _resolve_remote_iface_dns__unix {
+    my $self = shift;
+    $self->_warn('Retrieving by iface DNS servers using the shell on remote Unix hosts is not implemented yet');
+    ()
+}
+
+sub _resolve_remote_iface_dns__windows {
+    my ($self, $iface) = @_;
+    my $ssh = $self->{ssh};
+
+    my $out = $ssh->capture({remote_shell=> 'MSWin'}, 'powershell', '-Command', "Get-DnsClientServerAddress | ConvertTo-Json");
+    my @addrs;
+    eval {
+        for my $record (@{decode_json($out)}) {
+            if ($record->{InterfaceAlias} eq $iface and
+                $record->{AddressFamily} eq '2') {
+                push @addrs, @{$record->{ServerAddresses}};
+            }
+        }
+    };
+    unless (@addrs) {
+        $self->_warn("Failed to parse JSON output from DnsClientServerAddress", $@);
+        $self->_log(debug => "Output was", $out);
+    }
+    return @addrs;
+}
+
+
 sub _config_net_mappings {
     my $self = shift;
-    $self->{net_mapping} = {};
-    $self->{forward} = {};
-
+    $self->{net_mapping} //= {};
+    $self->{forward_ipv4} //= {};
+    $self->_config_net_mappings_net;
     $self->_config_net_mappings_direct;
     $self->_config_net_mappings_local;
     $self->_config_net_mappings_dns;
@@ -321,11 +375,11 @@ sub _config_net_mappings_net {
     for my $record (@{$self->{args}{route_nets}}) {
         my $addr = $record->{addr};
         my $mask = $record->{mask};
-        if ($self->_validate_ip($addr) and $self->_validate_netmask($mask)) {
-            $self->{forward}{"$addr/$mask"} = 1;
+        if ($self->_validate_ipv4($addr) and $self->_validate_netmask($mask)) {
+            $self->{forward_ipv4}{"$addr/$mask"} = 1;
         }
         else {
-            $self->_log(warn => "Ignoring invalid network", "$addr/$mask");
+            $self->_warn("Ignoring invalid network", "$addr/$mask");
         }
     }
 }
@@ -334,13 +388,13 @@ sub _config_net_mappings_direct {
     my $self = shift;
     for my $record (@{$self->{args}{route_hosts}}) {
         my $addrs = $record->{addrs} // [];
-        $self->{forward}{"$_/32"} = 1 for @$addrs;
+        $self->{forward_ipv4}{"$_/32"} = 1 for @$addrs;
         if (defined (my $host = $record->{host})) {
             if ($self->_validate_domain_name($host)) {
                 push @{$self->{net_mapping}{$host} //= []}, @$addrs;
             }
             else {
-                $self->_log(warn => "Ignoring host with invalid name", $host);
+                $self->_warn("Ignoring host with invalid name", $host);
             }
         }
     }
@@ -351,7 +405,7 @@ sub _config_net_mappings_local {
     for my $host (@{$self->{args}{route_hosts_local}}) {
         my $addr;
         if (is_ipv4($host)) {
-            $self->{forward}{"$host/32"} = 1;
+            $self->{forward_ipv4}{"$host/32"} = 1;
         }
         elsif ($self->_validate_domain_name($host)) {
             my $good;
@@ -362,17 +416,31 @@ sub _config_net_mappings_local {
                         my (undef, $packed_ip) = sockaddr_in($record->{addr});
                         my $addr = inet_ntoa($packed_ip);
                         push @{$self->{net_mapping}{$host} //= []}, $addr;
-                        $self->{forward}{"$addr/32"} = 1;
+                        $self->{forward_ipv4}{"$addr/32"} = 1;
                         $good = 1;
                     }
                 }
             }
-            $good or $self->_log(warn => "Failed to resolve host, ignoring it", $host);
+            $good or $self->_warn("Failed to resolve host, ignoring it", $host);
         }
         else {
-            $self->_log(warn => "Ignoring host with invalid name", $host);
+            $self->_warn("Ignoring host with invalid name", $host);
         }
     }
+}
+
+sub _validate_ipv4 {
+    my ($self, $ipv4) = @_;
+    is_ipv4($ipv4) and return 1;
+    $self->_log(debug => "Bad IPv4", $ipv4);
+    return undef;
+}
+
+sub _validate_netmask {
+    my ($self, $mask) = @_;
+    $mask =~ /\d+/ and $mask >= 1 and $mask <= 32 and return 1;
+    $self->_log(debug => "Bad netmask", $mask);
+    return undef;
 }
 
 sub _validate_domain_name {
@@ -397,15 +465,15 @@ sub _config_net_mappings_dns {
                         if ($rr->type eq 'A') {
                             my $addr = $rr->address;
                             push @{$self->{net_mapping}{$host} //= []}, $addr;
-                            $self->{forward}{"$addr/32"} = 1;
+                            $self->{forward_ipv4}{"$addr/32"} = 1;
                             $good = 1;
                         }
                     }
                 }
-                $good or $self->_log(warn => "Failed to resolve host using remote DNS, ignoring it", $host);
+                $good or $self->_warn("Failed to resolve host using remote DNS, ignoring it", $host);
             }
             else {
-                $self->_log(warn => "Ignoring host with invalid name", $host);
+                $self->_warn("Ignoring host with invalid name", $host);
             }
         }
     }
@@ -421,19 +489,19 @@ sub _config_net_mappings_ssh {
             my @addrs = $self->$method($host);
             for my $addr (@addrs) {
                 push @{$self->{net_mapping}{$host} //= []}, $addr;
-                $self->{forward}{"$addr/32"} = 1;
+                $self->{forward_ipv4}{"$addr/32"} = 1;
             }
-            @addrs or $self->_log(warn => "Failed to resolve host using remote DNS, ignoring it", $host);
+            @addrs or $self->_warn("Failed to resolve host using remote DNS, ignoring it", $host);
         }
         else {
-            $self->_log(warn => "Ignoring host with invalid name", $host);
+            $self->_warn("Ignoring host with invalid name", $host);
         }
     }
 }
 
 sub _resolve_remote_host_with_shell__unix {
     my $self = shift;
-    $self->_log(warn => 'Resolving using the shell on remote Unix hosts is not implemented yet');
+    $self->_warn('Resolving using the shell on remote Unix hosts is not implemented yet');
     ()
 }
 
@@ -455,7 +523,7 @@ sub _resolve_remote_host_with_shell__windows {
         return @addrs
     };
     unless (@addrs) {
-        $self->_log(warn => "Failed to parse JSON output from Resolve-DnsName", $@);
+        $self->_warn("Failed to parse JSON output from Resolve-DnsName", $@);
         $self->_log(debug => "Output was", $out);
     }
     return @addrs;
@@ -464,8 +532,9 @@ sub _resolve_remote_host_with_shell__windows {
 sub _init_dnsmasq {
     my $self = shift;
     my $net_mapping = $self->{net_mapping};
+    my $forward_dns = $self->{forward_dns};
 
-    if (%$net_mapping) {
+    if (%$net_mapping or %$forward_dns) {
         $self->_log(info => "Starting dnsmasq");
 
         my $pid_parent_dir = $self->{xdg}->state_home->child('dnsmasq')->mkdir;
@@ -477,14 +546,19 @@ sub _init_dnsmasq {
         my $butler = $self->{butler};
         my $user_name = $self->_get_user_name;
         my $group_name = $self->_get_group_name;
-        my $pid = $butler->start_dnsmasq(device => $self->{tap_device},
-                                         mapping => $net_mapping,
-                                         user => $user_name,
-                                         group => $group_name,
-                                         pid_fn => "$pid_fn",
-                                         log_fn => "$log_fn");
-        $self->{dnsmasq_pid} = $pid;
-        $self->_log(debug => "dnsmasq PID", $pid);
+        my $pid = $self->{dnsmasq_pid} = $butler->start_dnsmasq(device => $self->{tap_device},
+                                                                net_mapping => $net_mapping,
+                                                                forward_dns => $forward_dns,
+                                                                user => $user_name,
+                                                                group => $group_name,
+                                                                pid_fn => "$pid_fn",
+                                                                log_fn => "$log_fn");
+        if ($pid) {
+            $self->_log(debug => "dnsmasq PID", $pid);
+        }
+        else {
+            $self->_warn("dnsmasq failed to start correctly, no PID found");
+        }
     }
     else {
         $self->_log(debug => 'dnsmasq not required');
@@ -493,22 +567,23 @@ sub _init_dnsmasq {
 
 sub _init_resolver_rules {
     my $self = shift;
-    my $net_mapping = $self->{net_mapping};
-    if(%$net_mapping) {
+    my @domains = ( keys(%{$self->{net_mapping}}),
+                    keys(%{$self->{forward_dns}}) );
+    if(@domains) {
         $self->_log(info => "Setting up resolver rules");
         my $butler = $self->{butler};
         my $device = $self->{tap_device};
         my $local_ip = $self->{local_ip};
         $butler->resolvectl_dns(device => $device, dns => $local_ip);
-        for my $host (keys %$net_mapping) {
-            $butler->resolvectl_domain(device => $device, domain => $host);
+        for my $domain (@domains) {
+            $butler->resolvectl_domain(device => $device, domain => $domain);
         }
     }
 }
 
 sub _init_routes {
     my $self = shift;
-    my $forward = $self->{forward};
+    my $forward = $self->{forward_ipv4};
     if (%$forward) {
         $self->_log(info => "Setting up routes");
         my $butler = $self->{butler};
@@ -523,7 +598,7 @@ sub _get_user_name {
     my $user = getpwuid($<);
     return $user if $user;
 
-    $self->_log(warn => "Failed to get user name, using 'nobody'");
+    $self->_warn("Failed to get user name, using 'nobody'");
     return 'nobody';
 }
 
@@ -532,7 +607,7 @@ sub _get_group_name {
     my $group = getgrgid($();
     return $group if $group;
 
-    $self->_log(warn => "Failed to get group name, using 'nogroup'");
+    $self->_warn("Failed to get group name, using 'nogroup'");
     return 'nogroup'
 }
 
@@ -583,7 +658,7 @@ sub _wait_for_something {
                     return;
                 }
             }
-            $self->_log(warn => "Unknown process with PID $kid finished");
+            $self->_warn("Unknown process with PID $kid finished");
         }
     }
 }

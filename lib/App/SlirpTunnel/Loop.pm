@@ -122,7 +122,7 @@ sub _loop {
         if (vec($rfds, $err_fd, 1)) {
             my $n = sysread($ssh_err_handle, $err_buff, $max_buff_size, length($err_buff));
             if (!defined $n) {
-                $self->_log(warn => "Read from SSH error channel failed", $!);
+                $self->_warn("Read from SSH error channel failed", $!);
             }
             elsif ($n == 0) {
                 $self->_log(info => "SSH error channel closed");
@@ -143,10 +143,10 @@ sub _loop {
         if (vec($rfds, $ssh_fd, 1)) {
             my $n = sysread($ssh_handle, $ssh2tap_buff, $max_buff_size, length($ssh2tap_buff));
             if (!defined $n) {
-                $self->_log(warn => "Read from SSH failed", $!);
+                $self->_warn("Read from SSH failed", $!);
             }
             elsif ($n == 0) {
-                $self->_log(warn => "SSH closed connection");
+                $self->_warn("SSH closed connection");
                 $close_later++;
             }
         }
@@ -154,10 +154,10 @@ sub _loop {
         if (vec($rfds, $tap_fd, 1)) {
             my $n = sysread($tap_handle, $pkt_buff, $max_buff_size);
             if (!defined $n) {
-                $self->_log(warn => "Read from TAP failed", $!);
+                $self->_warn("Read from TAP failed", $!);
             }
             elsif ($n == 0) {
-                $self->_log(warn => "TAP closed connection");
+                $self->_warn("TAP closed connection");
                 $close_later++;
             }
             else {
@@ -168,10 +168,10 @@ sub _loop {
         if (vec($wfds, $ssh_fd, 1)) {
             my $n = syswrite($ssh_handle, $tap2ssh_buff, length($tap2ssh_buff));
             if (!defined $n) {
-                $self->_log(warn => "Write to SSH failed", $!);
+                $self->_warn("Write to SSH failed", $!);
             }
             elsif ($n == 0) {
-                $self->_log(warn => "SSH closed connection");
+                $self->_warn("SSH closed connection");
                 $close_later++;
             }
             else {
@@ -188,10 +188,10 @@ sub _loop {
                 # In any case, we remove the packet from the buffer. The TCP/IP magic!
                 substr($ssh2tap_buff, 0, $ssh2tap_pkt_len + 2) = '';
                 if (!defined $n) {
-                    $self->_log(warn => "Write to TAP failed", $!);
+                    $self->_warn("Write to TAP failed", $!);
                 }
                 elsif ($n == 0) {
-                    $self->_log(warn => "TAP closed", $!);
+                    $self->_warn("TAP closed", $!);
                     $close_later++;
                 }
             }

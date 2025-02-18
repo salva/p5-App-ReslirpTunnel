@@ -59,7 +59,8 @@ sub _device_addr_add__rpc {
 
 sub _start_dnsmasq__rpc {
     my ($self, $request) = @_;
-    my $mapping = $request->{mapping};
+    my $mapping = $request->{net_mapping};
+    my $forward = $request->{forward_dns};
     my $user = $request->{user} // 'nobody';
     my $group = $request->{group} // 'nogroup';
     my $pid_fn = $request->{pid_fn} // '';
@@ -77,9 +78,15 @@ sub _start_dnsmasq__rpc {
                 '--log-queries',
                 '--server=',
                 '--no-dhcp-interface=*');
+
     for my $domain (keys %$mapping) {
         push @args, "--address=/$domain/$_" for @{$mapping->{$domain}};
     }
+
+    for my $domain (keys %$forward) {
+        push @args, "--server=/$domain/$_" for @{$forward->{$domain}};
+    }
+
     my $r = $self->_do_system(@args);
 
     # Wait for the pid file to appear

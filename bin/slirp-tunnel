@@ -25,6 +25,7 @@ my @route_hosts;
 my @route_hosts_local;
 my @route_hosts_dns;
 my @route_hosts_ssh;
+my @forward_dns_ssh;
 my $log_to_stderr;
 my $log_file;
 my $log_level = 'warn';
@@ -41,7 +42,7 @@ sub parse_network {
 my $ipv4_re = qr/(?:(?:25[0-5]|2[0-4][0-9]|[0-1]?[0-9]{1,2})[.](?:25[0-5]|2[0-4][0-9]|[0-1]?[0-9]{1,2})[.](?:25[0-5]|2[0-4][0-9]|[0-1]?[0-9]{1,2})[.](?:25[0-5]|2[0-4][0-9]|[0-1]?[0-9]{1,2}))/;
 
 sub parse_route_host {
-    my $arg = shift;
+    my (undef, $arg) = @_;
     if (my ($addrs, $host) = $arg =~ /^($ipv4_re(?:,$ipv4_re)*)(?:=([^=]+))?$/o) {
         push @route_hosts, { host => $host, addrs => [split /,/, $addrs] };
     }
@@ -51,7 +52,7 @@ sub parse_route_host {
 }
 
 sub parse_route_net {
-    my $arg = shift;
+    my (undef, $arg) = @_;
     if (my ($net, $mask) = $arg =~ /^($ipv4_re)\/(\d+)$/) {
         push @route_nets, { addr => $net, mask => $mask };
     }
@@ -60,59 +61,69 @@ sub parse_route_net {
     }
 }
 
+sub parse_forward_dns_ssh {
+    my (undef, $arg) = @_;
+    if (my ($domain, $iface) = $arg =~ /^([^=]+)=(.*)$/) {
+        push @forward_dns_ssh, { domain => $domain, iface => $iface }
+    }
+    else {
+        die "Bad argument for --forward-dns-ssh: $arg\n";
+    }
+}
 GetOptions( 'C|slirp-cmd|slirp-command=s' => \$slirp_command,
-            's|ssh-cmd|ssh-command=s' => \$ssh_command,
+            'D|log-level=s' => \$log_level,
+            'E|log-to-stderr' => \$log_to_stderr,
+            'F|forward-dns-ssh=s' => \&parse_forward_dns_ssh,
+            'H|route-host-dns=s' => sub { push @route_hosts_dns, $_[1] },
+            'I|tap-device=s' => \$device,
+            'L|log-file=s' => \$log_file,
+            'N|route-net|route-network=s' => \&parse_route_net,
+            'O|route-host-local=s' => sub { push @route_hosts_local, $_[1] },
             'R|remote-os=s' => \$remote_os,
             'S|remote-shell=s' => \$remote_shell,
-            'n|remote-network=s' => sub { parse_network($_[1]) },
-            'm|remote-netmask=s' => \$remote_netmask,
-            'g|remote-gw=s' => \$remote_gw,
-            'd|remote-dns=s' => \$remote_dns,
             'a|local-ip=s' => \$local_ip,
-            'i|tap-device=s' => \$device,
-            's|ssh-arg=s' => sub { push @more_ssh_args, $_[1] },
-            'r|slirp-arg=s' => sub { push @more_slirp_args, $_[1] },
-            'E|log-to-stderr' => \$log_to_stderr,
-            'L|log-file=s' => \$log_file,
-            'D|log-level=s' => \$log_level,
-            'l|remote-user=s' => \$remote_user,
-            'p|remote-port=s' => \$remote_port,
-            'N|route-net|route-network=s' => \&parse_route_net,
-            'h|route-host=s' => \&parse_route_host,
-            'O|route-host-local=s' => sub { push @route_hosts_local, $_[1] },
-            'H|route-host-dns=s' => sub { push @route_hosts_dns, $_[1] },
-            'W|route-host-ssh=s' => sub { push @route_hosts_ssh, $_[1] },
+            'd|remote-dns=s' => \$remote_dns,
             'f|run-in-foreground' => \$run_in_foreground,
+            'g|remote-gw=s' => \$remote_gw,
+            'm|remote-netmask=s' => \$remote_netmask,
+            'n|remote-network=s' => sub { parse_network($_[1]) },
+            'p|remote-port=s' => \$remote_port,
+            'r|slirp-arg=s' => sub { push @more_slirp_args, $_[1] },
+            's|ssh-arg=s' => sub { push @more_ssh_args, $_[1] },
+            's|ssh-cmd|ssh-command=s' => \$ssh_command,
+            'l|remote-user=s' => \$remote_user,
+            'h|route-host=s' => \&parse_route_host,
+            'W|route-host-ssh=s' => sub { push @route_hosts_ssh, $_[1] },
             'dont-close-stdio' => \$dont_close_stdio )
     or die <<"USAGE";
 Usage: $0 [options]
 Options:
   -C, --slirp-cmd, --slirp-command <command>    Specify the slirp command
-  -s, --ssh-cmd, --ssh-command <command>        Specify the SSH command
+  -D, --log-level <level>                       Specify the log level
+  -E, --log-to-stderr                           Log to standard error
+  -F, --forward-dns-ssh <dns>=<remote_iface>    Specify additional forward DNS
+  -H, --route-host-dns <hostname>               Add route for host (resolve using remote DNS)
+  -I, --tap-device <device>                     Specify the tap device (autodetected by default)
+  -L, --log-file <file>                         Specify the log file (by default logs to a file in ~/.local/state/slirp-tunnel/logs)
+  -N, --route-net <ipv4>/<mask>                 Add route for network
+  -O, --route-host-local <hostname>             Add route for host (resolve locally)
   -R, --remote-os <os>                          Specify the remote operating system (autodetected by default)
   -S, --remote-shell <shell>                    Specify the remote shell (autodetected by default)
-  -n, --remote-network <network>                Specify the remote network (defaults to 10.0.2.0/24)
-  -m, --remote-netmask <netmask>                Specify the remote netmask (defaults to 255.255.255.0)
-  -g, --remote-gw <gateway>                     Specify the remote gateway (defaults to 10.0.2.2)
-  -d, --remote-dns <dns>                        Specify the remote DNS (defaults to 10.0.2.3)
   -a, --local-ip <ip>                           Specify the local IP (defaults to 10.0.2.30)
-  -i, --tap-device <device>                     Specify the tap device (autodetected by default)
-  -s, --ssh-arg <arg>                           Specify additional SSH arguments
-  -r, --slirp-arg <arg>                         Specify additional slirp arguments
-  -E, --log-to-stderr                           Log to standard error
-  -L, --log-file <file>                         Specify the log file (by default logs to a file in ~/.local/state/slirp-tunnel/logs)
-  -D, --log-level <level>                       Specify the log level
-  -l, --remote-user <user>                      Specify the remote user
-  -p, --remote-port <port>                      Specify the remote port (defaults to 22)
-  -N, --route-net <ipv4>/<mask>                 Add route for network
-  -h, --route-host <ipv4>[=<namename>]          Add route for host
-  -O, --route-host-local <hostname>             Add route for host (resolve locally)
-  -H, --route-host-dns <hostname>               Add route for host (resolve using remote DNS)
-  -W, --route-host-ssh <hostname>               Add route for host (resolve using remote command run through SSH)
+  -d, --remote-dns <dns>                        Specify the remote DNS (defaults to 10.0.2.3)
   -f, --run-in-foreground                       Run in foreground
+  -g, --remote-gw <gateway>                     Specify the remote gateway (defaults to 10.0.2.2)
+  -m, --remote-netmask <netmask>                Specify the remote netmask (defaults to 255.255.255.0)
+  -n, --remote-network <network>                Specify the remote network (defaults to 10.0.2.0/24)
+  -p, --remote-port <port>                      Specify the remote port (defaults to 22)
+  -r, --slirp-arg <arg>                         Specify additional slirp arguments
+  -s, --ssh-arg <arg>                           Specify additional SSH arguments
+  -s, --ssh-cmd, --ssh-command <command>        Specify the SSH command
+  -l, --remote-user <user>                      Specify the remote user
+  -h, --route-host <ipv4>[=<namename>]          Add route for host
+  -W, --route-host-ssh <hostname>               Add route for host (resolve using remote command run through SSH)
   --dont-close-stdio                            Don't close stdio
 USAGE
-
 my $remote_host = shift @ARGV // "localhost";
 
 # Allow remote address to accept port in the format hostname:port
@@ -141,7 +152,8 @@ my $tunnel = App::SlirpTunnel->new(app_name => 'slirp-tunnel',
                                    more_ssh_args => \@more_ssh_args,
                                    more_slirp_args => \@more_slirp_args,
                                    slirp_command => $slirp_command,
-                                   route_net => \@route_nets,
+                                   forward_dns_ssh => \@forward_dns_ssh,
+                                   route_nets => \@route_nets,
                                    route_hosts => \@route_hosts,
                                    route_hosts_local => \@route_hosts_local,
                                    route_hosts_dns => \@route_hosts_dns,

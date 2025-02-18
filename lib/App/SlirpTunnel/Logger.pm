@@ -49,10 +49,20 @@ sub _log {
     return;
 }
 
+sub _log_join { shift; join(': ', grep defined, @_) }
+
+sub _warn {
+    my ($self, @msg) = @_;
+    local ($?, $@, $!);
+    my $msg = $self->_log_join(@msg);
+    $self->_log(warn => @msg);
+    warn "$msg\n";
+}
+
 sub _die {
     my ($self, @msg) = @_;
     local ($?, $@, $!);
-    my $msg = join(': ', grep defined, @msg);
+    my $msg = $self->_log_join(@msg);
     $self->_log(fatal => $msg);
     die "$msg\n";
 }
