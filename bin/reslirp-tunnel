@@ -4,7 +4,11 @@ use strict;
 use warnings;
 use Getopt::Long qw(GetOptions);
 use App::ReslirpTunnel;
+use File::XDG;
+use Path::Tiny;
+use YAML;
 
+my $app_name = 'reslirp-tunnel';
 my $ssh_host = 'localhost';
 my $ssh_port = 22;
 my $ssh_user;
@@ -32,6 +36,8 @@ my $log_file;
 my $log_level = 'warn';
 my $dont_close_stdio;
 my $run_in_foreground;
+
+my $cfg;
 
 sub parse_network {
     my $arg = shift;
@@ -71,6 +77,84 @@ sub parse_forward_dns_ssh {
         die "Bad argument for --forward-dns-ssh: $arg\n";
     }
 }
+
+sub set_from_config {
+    my ($tree, $key, $ref) = @_;
+    if (defined(my $v = $tree->{$key})) {
+        if (ref($ref) eq 'SUB') {
+            $ref->($key, $v)
+        }
+        else {
+            $$ref = $v;
+        }
+    }
+}
+
+sub set_bool_from_config {
+    my ($tree, $key, $ref) = @_;
+    if (defined(my $v = $tree->{$key})) {
+        $$ref = !!$v;
+    }
+}
+
+sub set_array_from_config {
+    my ($tree, $key, $ref) = @_;
+    if (defined(my $array = $tree->{$key})) {
+        die "Bad value for $key in config, array expected\n" if ref($array) ne 'ARRAY';
+
+        if (ref($ref) eq 'ARRAY') {
+            push @$ref, @$array;
+        }
+        else {
+            $ref->($key, $_) for @$array;
+        }
+    }
+}
+
+sub apply_config {
+    my $tree = shift;
+    set_from_config($tree, 'ssh-host', \$ssh_host);
+    set_from_config($tree, 'ssh-port', \$ssh_port);
+    set_from_config($tree, 'ssh-user', \$ssh_user);
+    set_from_config($tree, 'remote-os', \$remote_os);
+    set_from_config($tree, 'remote-shell', \$remote_shell);
+    set_from_config($tree, 'ssh-command', \$ssh_command);
+    set_from_config($tree, 'reslirp-command', \$reslirp_command);
+    set_from_config($tree, 'remote-dns', \$remote_dns);
+    set_from_config($tree, 'remote-gw', \$remote_gw);
+    set_from_config($tree, 'local-ip', \$local_ip);
+    set_from_config($tree, 'device', \$device);
+    set_from_config($tree, 'log-file', \$log_file);
+    set_from_config($tree, 'log-level', \$log_level);
+    set_from_config($tree, 'remote-network', \&parse_network);
+
+    set_bool_from_config($tree, 'log-to-stderr', \$log_to_stderr);
+    set_bool_from_config($tree, 'dont-close-stdio', \$dont_close_stdio);
+    set_bool_from_config($tree, 'run-in-foreground', \$run_in_foreground);
+
+    set_array_from_config($tree, 'reslirp-args', \@more_reslirp_args);
+    set_array_from_config($tree, 'ssh-args', \@more_ssh_args);
+    set_array_from_config($tree, 'route-nets', \&parse_route_net);
+    set_array_from_config($tree, 'route-hosts', \&parse_route_host);
+    set_array_from_config($tree, 'route-hosts-local', \@route_hosts_local);
+    set_array_from_config($tree, 'route-hosts-dns', \@route_hosts_dns);
+    set_array_from_config($tree, 'route-hosts-ssh', \@route_hosts_ssh);
+    set_array_from_config($tree, 'forward-dnss-ssh', \&parse_forward_dns_ssh);
+    set_array_from_config($tree, 'forward-dns-ssh', \&parse_forward_dns_ssh);
+}
+
+sub load_profile {
+    my $tree = $cfg->{profiles}{$_[1]} or die "Profile not found: $_[1]\n";
+    apply_config($tree);
+}
+
+my $xdg =  File::XDG->new(name => $app_name, path_class => 'Path::Tiny');
+my $config_fn = $xdg->lookup_config_file("$app_name.yaml");
+
+$cfg = defined $config_fn ? YAML::LoadFile($config_fn) : {};
+apply_config($cfg->{profiles}{default} // {});
+
+
 GetOptions( 'C|reslirp-cmd|reslirp-command=s' => \$reslirp_command,
             'D|log-level=s' => \$log_level,
             'E|log-to-stderr' => \$log_to_stderr,
@@ -95,7 +179,8 @@ GetOptions( 'C|reslirp-cmd|reslirp-command=s' => \$reslirp_command,
             't|ssh-host=s' => \$ssh_host,
             'h|route-host=s' => \&parse_route_host,
             'W|route-host-ssh=s' => sub { push @route_hosts_ssh, $_[1] },
-            'dont-close-stdio' => \$dont_close_stdio )
+            'dont-close-stdio' => \$dont_close_stdio,
+            'P|profile=s' => \&load_profile)
     or die <<"USAGE";
 Usage: $0 [options]
 Options:
@@ -122,6 +207,7 @@ Options:
   -E, --log-to-stderr                             Log to standard error
   -L, --log-file <file>                           Specify the log file (by default logs to a file in ~/.local/state/reslirp-tunnel/logs).
   -f, --run-in-foreground                         Run in foreground
+  -P, --profile <profile>                         Load profile
   --dont-close-stdio                              Don't close stdio
 USAGE
 
@@ -138,32 +224,32 @@ if (defined $device) {
     $device = "tap$device" if $device =~ /^\d+$/;
 }
 
-my $tunnel = App::ReslirpTunnel->new(app_name => 'reslirp-tunnel',
-                                   ssh_port => $ssh_port,
-                                   ssh_host => $ssh_host,
-                                   ssh_user => $ssh_user,
-                                   remote_os => $remote_os,
-                                   remote_network => $remote_network,
-                                   remote_netmask => $remote_netmask,
-                                   remote_gw => $remote_gw,
-                                   remote_dns => $remote_dns,
-                                   local_ip => $local_ip,
-                                   ssh_command => $ssh_command,
-                                   more_ssh_args => \@more_ssh_args,
-                                   more_reslirp_args => \@more_reslirp_args,
-                                   reslirp_command => $reslirp_command,
-                                   forward_dns_ssh => \@forward_dns_ssh,
-                                   route_nets => \@route_nets,
-                                   route_hosts => \@route_hosts,
-                                   route_hosts_local => \@route_hosts_local,
-                                   route_hosts_dns => \@route_hosts_dns,
-                                   route_hosts_ssh => \@route_hosts_ssh,
-                                   log_to_stderr => $log_to_stderr,
-                                   log_file => $log_file,
-                                   log_level => $log_level,
-                                   run_in_foreground => $run_in_foreground,
-                                   dont_close_stdio => $dont_close_stdio,
-                                   device => $device);
+my $tunnel = App::ReslirpTunnel->new(app_name => $app_name,
+                                     ssh_port => $ssh_port,
+                                     ssh_host => $ssh_host,
+                                     ssh_user => $ssh_user,
+                                     remote_os => $remote_os,
+                                     remote_network => $remote_network,
+                                     remote_netmask => $remote_netmask,
+                                     remote_gw => $remote_gw,
+                                     remote_dns => $remote_dns,
+                                     local_ip => $local_ip,
+                                     ssh_command => $ssh_command,
+                                     more_ssh_args => \@more_ssh_args,
+                                     more_reslirp_args => \@more_reslirp_args,
+                                     reslirp_command => $reslirp_command,
+                                     forward_dns_ssh => \@forward_dns_ssh,
+                                     route_nets => \@route_nets,
+                                     route_hosts => \@route_hosts,
+                                     route_hosts_local => \@route_hosts_local,
+                                     route_hosts_dns => \@route_hosts_dns,
+                                     route_hosts_ssh => \@route_hosts_ssh,
+                                     log_to_stderr => $log_to_stderr,
+                                     log_file => $log_file,
+                                     log_level => $log_level,
+                                     run_in_foreground => $run_in_foreground,
+                                     dont_close_stdio => $dont_close_stdio,
+                                     device => $device);
 
 $tunnel->go;
 
@@ -347,11 +433,44 @@ matters by preventing error messages from being printed
 afterward. Enabling this option ensures that the standard input/output
 channels remain open.
 
+=item B<-P>, <--profile> I<profile_name>
+
+Load a profile from the configuration file.
+
 =back
 
 =head1 EXAMPLES
 
   reslirp-tunnel --route-net=10.0.0.0/8 --forward-dns-ssh=windows.net localhost:4022
+
+=head1 CONFIGURATION FILE
+
+On startutp C<reslirp-tunnel> reads the configuration file at
+C<~/.config/reslirp-tunnel.yaml>.
+
+Several profiles can be defined in this file. If one called C<default>
+exists it is used to set the configuration.
+
+Additional profiles can be loaded with the command line option
+C<--profile>.
+
+=head2 Example Configuration File
+
+    profiles:
+      default:
+         run-in-foreground: 0
+         dont-close-stdio: 1
+         log-level: debug
+
+      daily-planet:
+        ssh-host: localhost
+        ssh-port: 5022
+        ssh-user: llane
+        route-nets:
+          - 10.0.0.0/8
+        forward-dnss-ssh:
+          - daily-planet.com
+          - krypton.org
 
 =head1 UNDER THE HOOD
 

@@ -1,6 +1,7 @@
 Revision history for Perl extension App::ReslirpTunnel.
 
-0.04
+0.04  Feb 19, 2025
+      - Add support for configuration file and profiles
       - Argument parsing improvements.
       - Documentation fixes.
 

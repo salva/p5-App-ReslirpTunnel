@@ -77,7 +77,7 @@ sub _init_logger {
         $fn = $parent_dir->child($self->{timestamp}.".reslirp-tunnel.log");
         eval {
             my $sl = $parent_dir->child('latest.reslirp-tunnel.log');
-            unlink $sl if -e $sl;
+            unlink $sl if -l $sl;
             symlink $fn, $sl;
         };
     }
