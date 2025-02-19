@@ -188,9 +188,6 @@ The program is designed to be executed by a non-root user. It
 automatically invokes sudo in the background, which typically prompts
 the user for a password to perform privileged operations.
 
-Also, the program is intended to be run on Linux system using
-C<systemd>.
-
 =head1 OPTIONS
 
 =over 8
@@ -199,7 +196,7 @@ C<systemd>.
 
 Specify the reSLIRP command to be used.
 
-By default, it uses C<C:\Program Files\reSLIRP\reslirp.ext>. When the
+By default, it uses C<C:\Program Files\reSLIRP\reslirp.exe>. When the
 remote Operating System is Windows and C<reslirp> otherwise.
 
 =item B<-s, --ssh-cmd, --ssh-command> I<command>
@@ -374,30 +371,38 @@ Creates a C<tap> device.
 
 =item 5.
 
-Executes C<reSLIRP> on the remote machine, linking it to the C<tap> device through an SSH channel.
+Executes C<reSLIRP> on the remote machine, linking it to the C<tap>
+device through an SSH channel.
 
 =item 6.
 
-If necessary, retrieves information about the remote machine's network configuration by executing commands over the SSH channel.
+If necessary, retrieves information about the remote machine's network
+configuration by executing commands over the SSH channel.
 
 =item 7.
 
-If necessary, starts a local DNS server (C<dnsmasq>) linked to the C<tap> device, configuring it to serve the various hosts and domains specified on the command line.
+If necessary, starts a local DNS server (C<dnsmasq>) linked to the
+C<tap> device, configuring it to serve the various hosts and domains
+specified on the command line.
 
 =item 8.
 
-Adds all required routes to direct IP traffic through the tunnel, in accordance with the provided command line parameters.
+Adds all required routes to direct IP traffic through the tunnel, in
+accordance with the provided command line parameters.
 
 =item 9.
 
 If something goes wrong, or the process receives a signal, it cleans
 up, waiting for the child processes to exit and terminates.
 
+=back
+
 Note that IP routes and DNS configurations are attached to the C<tap>
 device, so they are automatically removed when the device is deleted.
 
-=back
-
+Note also that, so far, C<reslirp-tunnel> only works in Linux
+systems. If you need support for other operating systems, please let
+me know.
 
 =head1 COPYRIGHT AND LICENSE
 
