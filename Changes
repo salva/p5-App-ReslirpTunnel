@@ -1,5 +1,9 @@
 Revision history for Perl extension App::ReslirpTunnel.
 
+0.04
+      - Argument parsing improvements.
+      - Documentation fixes.
+
 0.03  Feb 19, 2025
       - Add Socket::MsgHdr dependency.
 
