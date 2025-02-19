@@ -104,8 +104,9 @@ sub _init_config {
     $self->{run_in_foreground} = $args->{run_in_foreground} // 0;
     $self->{dont_close_stdio} = $args->{dont_close_stdio} // 0;
 
-    $self->{remote_host} = $args->{remote_host};
-    $self->{remote_port} = $args->{remote_port};
+    $self->{ssh_host} = $args->{ssh_host};
+    $self->{ssh_port} = $args->{ssh_port};
+    $self->{ssh_user} = $args->{ssh_user};
 
     $self->{remote_network} = $args->{remote_network} // '10.0.2.0';
     is_ipv4($self->{remote_network}) or $self->_die("Invalid remote network address, $self->{remote_network}");
@@ -194,9 +195,9 @@ sub _send_to_background {
 
 sub _init_ssh {
     my $self = shift;
-    my $host = $self->{remote_host} // $self->_die("No remote host specified");
-    my $port = $self->{remote_port};
-    my $user = $self->{remote_user};
+    my $host = $self->{ssh_host} // $self->_die("No remote host specified");
+    my $port = $self->{ssh_port};
+    my $user = $self->{ssh_user};
     my $cmd = $self->{args}{ssh_command};
     my $more_args = $self->{args}{more_ssh_args};
     my @args = (host => $host);
