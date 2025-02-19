@@ -433,7 +433,7 @@ matters by preventing error messages from being printed
 afterward. Enabling this option ensures that the standard input/output
 channels remain open.
 
-=item B<-P>, <--profile> I<profile_name>
+=item B<-P>, B<--profile> I<profile_name>
 
 Load a profile from the configuration file.
 
