@@ -1,11 +1,10 @@
 package App::ReslirpTunnel;
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 use strict;
 use warnings;
 
-use JSON;
 use Socket;
 use Data::Validate::Domain qw(is_hostname);
 use Data::Validate::IP qw(is_ipv4);
@@ -13,6 +12,7 @@ use Path::Tiny;
 use File::XDG;
 use POSIX;
 use Net::OpenSSH;
+use JSON::PP;
 
 use parent 'App::ReslirpTunnel::Logger';
 
@@ -345,7 +345,7 @@ sub _resolve_remote_iface_dns__windows {
     my $out = $ssh->capture({remote_shell=> 'MSWin'}, 'powershell', '-Command', "Get-DnsClientServerAddress | ConvertTo-Json");
     my @addrs;
     eval {
-        for my $record (@{decode_json($out)}) {
+        for my $record (@{JSON::PP::decode_json($out)}) {
             if ($record->{InterfaceAlias} eq $iface and
                 $record->{AddressFamily} eq '2') {
                 push @addrs, @{$record->{ServerAddresses}};
@@ -513,7 +513,7 @@ sub _resolve_remote_host_with_shell__windows {
     my $out = $ssh->capture({remote_shell=> 'MSWin'}, 'powershell', '-Command', "Resolve-DnsName $host | ConvertTo-Json");
     my @addrs;
     eval {
-        my $records = decode_json($out);
+        my $records = JSON::PP::decode_json($out);
         my @names = $host;
         for my $r (@$records) {
             push @names, $r->{NameHost} if $r->{Type} == 5;
